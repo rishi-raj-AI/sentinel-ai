@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from app.forensics.sigma_engine import SigmaEngine
 from app.forensics.timeline import TimelineStore
 
 
@@ -73,6 +74,10 @@ class EvidenceGraphEngine:
                 return str(value)
         return None
 
+    @staticmethod
+    def _default_sigma_rules() -> Path:
+        return Path(__file__).resolve().parents[2] / "rules" / "sigma"
+
     def build(self, *, max_nodes: int = 1000, max_edges: int = 2000) -> dict[str, Any]:
         events = self.store.read()
         nodes: dict[str, GraphNode] = {}
@@ -98,9 +103,6 @@ class EvidenceGraphEngine:
             seen_edges.add(key)
             edges.append(GraphEdge(source, target, relation, attributes))
 
-        # Registered evidence belongs in the graph even before any analyzer emits
-        # timeline events for it. This makes integrity-registered evidence directly
-        # discoverable and gives later YARA/PCAP/Volatility events stable roots.
         case_json = self.case_dir / "case.json"
         if case_json.is_file():
             try:
@@ -261,6 +263,46 @@ class EvidenceGraphEngine:
                 if process_node:
                     relation = "loaded" if node_type == "module" else "touched"
                     add_edge(process_node, file_node, relation, timestamp=timestamp)
+
+        # Sigma is evaluated read-only and overlaid onto the graph. Detections are
+        # not written back into the timeline, avoiding duplicate detection events
+        # while still making the rule/evidence/event relationship queryable.
+        rules_path = self._default_sigma_rules()
+        if rules_path.is_dir():
+            sigma = SigmaEngine(self.case_dir).analyze(str(rules_path), max_detections=250)
+            for detection in sigma.get("detections", []):
+                rule_id = str(detection.get("rule_id") or "unnamed-rule")
+                timestamp = detection.get("event_timestamp")
+                sigma_rule = add_node(
+                    "sigma_rule",
+                    rule_id,
+                    title=detection.get("title"),
+                    level=detection.get("level"),
+                    tags=detection.get("tags") or [],
+                )
+                detection_id = f"{rule_id}|{timestamp}|{detection.get('evidence_id') or ''}"
+                detection_node = add_node(
+                    "detection",
+                    detection_id,
+                    engine="sigma",
+                    rule_id=rule_id,
+                    title=detection.get("title"),
+                    level=detection.get("level"),
+                    timestamp=timestamp,
+                    evidence_id=detection.get("evidence_id"),
+                )
+                add_edge(detection_node, sigma_rule, "triggered_by", timestamp=timestamp)
+                evidence_id = detection.get("evidence_id")
+                if evidence_id:
+                    evidence_node = add_node("evidence", str(evidence_id))
+                    add_edge(evidence_node, detection_node, "produced_detection", timestamp=timestamp)
+                event = detection.get("event") or {}
+                event_id = self._node_id(
+                    "event",
+                    f"{event.get('timestamp')}|{event.get('source')}|{event.get('summary')}",
+                )
+                if event_id in nodes:
+                    add_edge(detection_node, event_id, "detected", timestamp=timestamp)
 
         type_counts = Counter(node.type for node in nodes.values())
         relation_counts = Counter(edge.relation for edge in edges)
