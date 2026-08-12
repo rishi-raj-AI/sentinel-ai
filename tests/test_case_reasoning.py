@@ -28,8 +28,33 @@ def test_case_brief_correlates_sigma_and_network(tmp_path):
     assert result["coverage"]["sigma_detections"] >= 1
     assert result["coverage"]["pcap_events"] == 1
     assert any(item["kind"] == "sigma_detection" for item in result["observations"])
+    network = next(item for item in result["observations"] if item["kind"] == "network_anomaly")
+    assert network["basis"].startswith("UDP flow ")
     assert result["recommended_actions"]
     assert "verdict" in result["interpretation"].lower()
+
+
+def test_case_brief_deduplicates_repeated_yara_matches(tmp_path):
+    case_dir = tmp_path / "case"
+    store = TimelineStore(case_dir)
+    for timestamp in ("2026-08-12T21:18:51+00:00", "2026-08-12T21:19:04+00:00"):
+        store.append(TimelineEvent(
+            timestamp=timestamp,
+            source="yara",
+            event_type="yara_match",
+            summary="YARA match: Sentinel_Test_Artifact",
+            details={"rule": "Sentinel_Test_Artifact"},
+            evidence_id="E0004",
+        ))
+
+    result = CaseReasoningEngine(case_dir).build(max_items=10)
+    yara = [item for item in result["observations"] if item["kind"] == "yara_match"]
+    assert len(yara) == 1
+    assert yara[0]["match_count"] == 2
+    assert yara[0]["first_seen"] == "2026-08-12T21:18:51+00:00"
+    assert yara[0]["last_seen"] == "2026-08-12T21:19:04+00:00"
+    assert result["coverage"]["yara_matches"] == 2
+    assert result["coverage"]["yara_unique_matches"] == 1
 
 
 def test_threat_intel_inventory_is_local_and_classifies_documentation(tmp_path):
