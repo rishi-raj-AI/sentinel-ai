@@ -53,9 +53,48 @@ def test_network_intelligence_aggregates_flows(tmp_path):
 
     result = NetworkIntelligenceEngine(case_dir).analyze()
     assert result["network_event_count"] == 3
+    assert result["network_events_ignored"] == 0
     assert result["flow_count"] == 2
     assert result["dns_queries"] == {"example.com": 2}
     assert result["flows"][0]["packet_count"] == 2
+    assert result["source_scopes"] == {"private": 3}
+    assert result["destination_scopes"] == {"public": 3}
+    assert len(result["findings"]["unusual_destination_ports"]) == 1
+
+
+def test_network_intelligence_labels_documentation_ranges_and_ignores_empty_events(tmp_path):
+    case_dir = tmp_path / "DFIR-DOC"
+    store = TimelineStore(case_dir)
+    store.append(TimelineEvent(
+        timestamp="2026-08-12T19:30:00+00:00",
+        source="testlog",
+        event_type="network",
+        summary="Outbound connection",
+        details={},
+    ))
+    store.append(TimelineEvent(
+        timestamp="2026-08-12T19:30:01+00:00",
+        source="tshark",
+        event_type="network",
+        summary="192.0.2.10 → 198.51.100.20",
+        details={
+            "src": "192.0.2.10",
+            "dst": "198.51.100.20",
+            "udp_srcport": "54000",
+            "udp_dstport": "4444",
+            "protocols": "eth:ip:udp:data",
+        },
+        evidence_id="E0003",
+    ))
+
+    result = NetworkIntelligenceEngine(case_dir).analyze()
+    assert result["network_event_count"] == 2
+    assert result["network_events_ignored"] == 1
+    assert result["flow_count"] == 1
+    assert result["flows"][0]["src_scope"] == "documentation"
+    assert result["flows"][0]["dst_scope"] == "documentation"
+    assert result["source_scopes"] == {"documentation": 1}
+    assert result["destination_scopes"] == {"documentation": 1}
     assert len(result["findings"]["unusual_destination_ports"]) == 1
 
 
