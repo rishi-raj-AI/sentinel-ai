@@ -4,6 +4,7 @@ from app.forensics.case_manager import CaseManager
 from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
 from app.forensics.event_import import import_jsonl_events, timeline_summary
+from app.forensics.macos_logs import MacOSLogAdapter
 
 
 def create_case(title: str, description: str = ""):
@@ -38,3 +39,18 @@ def correlate_case(case_id: str, window_seconds: int = 300):
     case_dir = CaseManager().root / case_id
     CaseManager().load_case(case_id)
     return CorrelationEngine(case_dir).analyze(window_seconds=window_seconds)
+
+
+def collect_macos_logs(
+    case_id: str,
+    last: str = "5m",
+    predicate: str | None = None,
+    max_events: int = 1000,
+):
+    case_dir = CaseManager().root / case_id
+    CaseManager().load_case(case_id)
+    return MacOSLogAdapter(case_dir).collect(
+        last=last,
+        predicate=predicate,
+        max_events=max_events,
+    )
