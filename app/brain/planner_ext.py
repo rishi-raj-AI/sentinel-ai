@@ -15,9 +15,30 @@ def plan_command(command: str) -> CommandPlan:
         prefix = "copilot ask " if lower.startswith("copilot ask ") else "ask copilot "
         parts = text[len(prefix):].strip().split(maxsplit=1)
         if len(parts) == 2:
+            return CommandPlan(intent="copilot_ask", steps=[ToolCall(tool="forensic.copilot_ask", arguments={"case_id": parts[0], "question": parts[1]})])
+
+    if lower.startswith("autonomous investigate ") or lower.startswith("agent investigate "):
+        prefix = "autonomous investigate " if lower.startswith("autonomous investigate ") else "agent investigate "
+        parts = text[len(prefix):].strip().split(maxsplit=1)
+        if len(parts) == 2:
             return CommandPlan(
-                intent="copilot_ask",
-                steps=[ToolCall(tool="forensic.copilot_ask", arguments={"case_id": parts[0], "question": parts[1]})],
+                intent="autonomous_investigate",
+                steps=[ToolCall(tool="forensic.autonomous_investigate", arguments={"case_id": parts[0], "objective": parts[1]})],
+            )
+
+    if lower.startswith("investigation runs ") or lower.startswith("agent runs "):
+        prefix = "investigation runs " if lower.startswith("investigation runs ") else "agent runs "
+        case_id = text[len(prefix):].strip()
+        if case_id:
+            return CommandPlan(intent="list_investigation_runs", steps=[ToolCall(tool="forensic.list_investigation_runs", arguments={"case_id": case_id})])
+
+    if lower.startswith("show investigation ") or lower.startswith("show agent run "):
+        prefix = "show investigation " if lower.startswith("show investigation ") else "show agent run "
+        parts = text[len(prefix):].strip().split(maxsplit=1)
+        if len(parts) == 2:
+            return CommandPlan(
+                intent="show_investigation_run",
+                steps=[ToolCall(tool="forensic.show_investigation_run", arguments={"case_id": parts[0], "run_id": parts[1]})],
             )
 
     if lower.startswith("sigma analyze ") or lower.startswith("sigma scan "):
@@ -64,9 +85,6 @@ def plan_command(command: str) -> CommandPlan:
         prefix = "verify report " if lower.startswith("verify report ") else "report verify "
         parts = text[len(prefix):].strip().split(maxsplit=1)
         if len(parts) == 2:
-            return CommandPlan(
-                intent="verify_case_report",
-                steps=[ToolCall(tool="forensic.verify_case_report", arguments={"case_id": parts[0], "report_name": parts[1]})],
-            )
+            return CommandPlan(intent="verify_case_report", steps=[ToolCall(tool="forensic.verify_case_report", arguments={"case_id": parts[0], "report_name": parts[1]})])
 
     return base_plan_command(command)
