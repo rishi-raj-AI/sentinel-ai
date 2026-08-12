@@ -26,7 +26,7 @@ def test_integrated_investigation_uses_flow_level_network_findings(tmp_path, mon
     ))
 
     import app.tools.forensics as tools
-    monkeypatch.setattr(tools.CaseManager, "root", cases_root)
+    monkeypatch.setattr(tools, "CaseManager", lambda: case_manager)
 
     result = investigate_case(case["case_id"], window_seconds=120, max_findings=20)
 
