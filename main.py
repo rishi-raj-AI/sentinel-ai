@@ -11,6 +11,11 @@ from app.executor import Executor
 app = typer.Typer(help="Sentinel AI Phase 1 local assistant")
 
 
+@app.callback()
+def main() -> None:
+    """Sentinel AI command-line interface."""
+
+
 @app.command()
 def run(command: str = typer.Argument(..., help="Natural-language command")) -> None:
     plan = plan_command(command)
