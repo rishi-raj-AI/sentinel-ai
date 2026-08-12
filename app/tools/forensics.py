@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.forensics.case_manager import CaseManager
 from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
@@ -71,6 +73,14 @@ def volatility_status():
     return VolatilityAdapter.status()
 
 
+def _resolve_case_evidence(case_id: str, evidence_id: str) -> dict:
+    record = CaseManager().load_case(case_id)
+    for item in record.get("evidence", []):
+        if item.get("evidence_id") == evidence_id:
+            return item
+    raise ValueError(f"Evidence not found in {case_id}: {evidence_id}")
+
+
 def run_volatility(
     case_id: str,
     image_path: str,
@@ -84,3 +94,26 @@ def run_volatility(
         plugin=plugin,
         evidence_id=evidence_id,
     )
+
+
+def run_volatility_evidence(case_id: str, evidence_id: str, plugin: str):
+    verification = EvidenceManager().verify(case_id=case_id, evidence_id=evidence_id)
+    if not verification.get("all_match") or not verification.get("chain_of_custody_valid"):
+        raise RuntimeError(f"Evidence integrity verification failed for {case_id}/{evidence_id}")
+
+    item = _resolve_case_evidence(case_id, evidence_id)
+    stored_path = Path(item["stored_path"]).resolve()
+    if not stored_path.is_file():
+        raise FileNotFoundError(f"Stored evidence file not found: {stored_path}")
+
+    case_dir = CaseManager().root / case_id
+    result = VolatilityAdapter(case_dir).run(
+        image_path=str(stored_path),
+        plugin=plugin,
+        evidence_id=evidence_id,
+    )
+    result["case_id"] = case_id
+    result["evidence_id"] = evidence_id
+    result["evidence_sha256_verified"] = True
+    result["chain_of_custody_valid"] = True
+    return result
