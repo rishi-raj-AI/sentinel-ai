@@ -33,6 +33,29 @@ class CaseReasoningEngine:
             return "medium"
         return "low"
 
+    @staticmethod
+    def _deduplicate_yara(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+        for event in events:
+            details = event.get("details") or {}
+            key = (event.get("evidence_id"), details.get("rule"))
+            current = grouped.get(key)
+            timestamp = event.get("timestamp")
+            if current is None:
+                grouped[key] = {
+                    "event": event,
+                    "match_count": 1,
+                    "first_seen": timestamp,
+                    "last_seen": timestamp,
+                }
+                continue
+            current["match_count"] += 1
+            if timestamp and (not current["first_seen"] or timestamp < current["first_seen"]):
+                current["first_seen"] = timestamp
+            if timestamp and (not current["last_seen"] or timestamp > current["last_seen"]):
+                current["last_seen"] = timestamp
+        return list(grouped.values())
+
     def build(self, *, max_items: int = 20) -> dict[str, Any]:
         events = self.timeline.read()
         heuristic = InvestigationEngine(self.case_dir).analyze(window_seconds=120, max_findings=max_items)
@@ -42,6 +65,7 @@ class CaseReasoningEngine:
         graph = EvidenceGraphEngine(self.case_dir).build(max_nodes=3000, max_edges=6000)
 
         yara_events = [e for e in events if e.get("source") == "yara" or e.get("event_type") == "yara_match"]
+        yara_groups = self._deduplicate_yara(yara_events)
         evtx_events = [e for e in events if e.get("source") == "evtx"]
         volatility_events = [e for e in events if e.get("source") == "volatility"]
         pcap_events = [e for e in events if e.get("source") == "tshark"]
@@ -56,35 +80,42 @@ class CaseReasoningEngine:
                 "timestamp": detection.get("event_timestamp"),
                 "basis": f"Sigma rule {detection.get('rule_id')} matched selections {detection.get('matched_selections', [])}",
             })
-        for event in yara_events[:max_items]:
+        for group in yara_groups[:max_items]:
+            event = group["event"]
+            details = event.get("details") or {}
+            count = group["match_count"]
             observations.append({
                 "kind": "yara_match",
                 "severity": "medium",
                 "title": event.get("summary"),
                 "evidence_id": event.get("evidence_id"),
-                "timestamp": event.get("timestamp"),
-                "basis": f"YARA rule {(event.get('details') or {}).get('rule')} matched preserved evidence",
+                "timestamp": group["first_seen"],
+                "first_seen": group["first_seen"],
+                "last_seen": group["last_seen"],
+                "match_count": count,
+                "basis": f"YARA rule {details.get('rule')} matched preserved evidence {count} time(s)",
             })
         for flow in network.get("findings", {}).get("unusual_destination_ports", [])[:max_items]:
+            protocol = flow.get("protocol") or "UNKNOWN"
             observations.append({
                 "kind": "network_anomaly",
                 "severity": "medium",
                 "title": "Unusual destination port",
                 "evidence_id": (flow.get("evidence_ids") or [None])[0],
                 "timestamp": flow.get("first_seen"),
-                "basis": f"{flow.get('protocol')} flow {flow.get('src')}:{flow.get('src_port')} -> {flow.get('dst')}:{flow.get('dst_port')}",
+                "basis": f"{protocol} flow {flow.get('src')}:{flow.get('src_port')} -> {flow.get('dst')}:{flow.get('dst_port')}",
             })
 
         evidence_sources = Counter(str(e.get("source") or "unknown") for e in events)
         score = 0
         score += min(4, sigma.get("detection_count", 0) * 2)
-        score += min(2, len(yara_events))
+        score += min(2, len(yara_groups))
         score += 1 if network.get("findings", {}).get("unusual_destination_ports") else 0
         score += 1 if attack.get("candidate_count", 0) else 0
         confidence = self._confidence(score)
 
         hypotheses: list[dict[str, Any]] = []
-        if sigma.get("detection_count") or yara_events:
+        if sigma.get("detection_count") or yara_groups:
             hypotheses.append({
                 "statement": "The case contains rule-based indicators that warrant investigator review.",
                 "confidence": confidence,
@@ -121,7 +152,7 @@ class CaseReasoningEngine:
             recommendations.append("Identify the process/user responsible for each unusual network flow and correlate it with endpoint telemetry.")
         if sigma.get("detection_count"):
             recommendations.append("Validate each Sigma detection against surrounding timeline events and the originating evidence before escalation.")
-        if yara_events:
+        if yara_groups:
             recommendations.append("Review YARA-matched files in context and confirm whether the rule is test-only, generic, or malware-specific.")
 
         headline = "No high-confidence compromise established"
@@ -145,6 +176,7 @@ class CaseReasoningEngine:
                 "events_by_source": dict(evidence_sources),
                 "sigma_detections": sigma.get("detection_count", 0),
                 "yara_matches": len(yara_events),
+                "yara_unique_matches": len(yara_groups),
                 "evtx_events": len(evtx_events),
                 "volatility_events": len(volatility_events),
                 "pcap_events": len(pcap_events),
