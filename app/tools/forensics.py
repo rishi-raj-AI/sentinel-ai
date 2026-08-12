@@ -8,6 +8,7 @@ from app.forensics.evidence import EvidenceManager
 from app.forensics.event_import import import_jsonl_events, timeline_summary
 from app.forensics.investigation import InvestigationEngine
 from app.forensics.macos_logs import MacOSLogAdapter
+from app.forensics.pcap import TsharkAdapter
 from app.forensics.volatility import VolatilityAdapter
 
 
@@ -73,6 +74,10 @@ def volatility_status():
     return VolatilityAdapter.status()
 
 
+def tshark_status():
+    return TsharkAdapter.status()
+
+
 def _resolve_case_evidence(case_id: str, evidence_id: str) -> dict:
     record = CaseManager().load_case(case_id)
     for item in record.get("evidence", []):
@@ -111,6 +116,29 @@ def run_volatility_evidence(case_id: str, evidence_id: str, plugin: str):
         image_path=str(stored_path),
         plugin=plugin,
         evidence_id=evidence_id,
+    )
+    result["case_id"] = case_id
+    result["evidence_id"] = evidence_id
+    result["evidence_sha256_verified"] = True
+    result["chain_of_custody_valid"] = True
+    return result
+
+
+def analyze_pcap_evidence(case_id: str, evidence_id: str, max_packets: int = 5000):
+    verification = EvidenceManager().verify(case_id=case_id, evidence_id=evidence_id)
+    if not verification.get("all_match") or not verification.get("chain_of_custody_valid"):
+        raise RuntimeError(f"Evidence integrity verification failed for {case_id}/{evidence_id}")
+
+    item = _resolve_case_evidence(case_id, evidence_id)
+    stored_path = Path(item["stored_path"]).resolve()
+    if not stored_path.is_file():
+        raise FileNotFoundError(f"Stored evidence file not found: {stored_path}")
+
+    case_dir = CaseManager().root / case_id
+    result = TsharkAdapter(case_dir).analyze(
+        pcap_path=str(stored_path),
+        evidence_id=evidence_id,
+        max_packets=max_packets,
     )
     result["case_id"] = case_id
     result["evidence_id"] = evidence_id
