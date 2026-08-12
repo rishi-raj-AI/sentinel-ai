@@ -7,6 +7,7 @@ from app.brain.planner import plan_command
 from app.executor import ConfirmationRequired, Executor
 from app.forensics.case_manager import CaseManager
 from app.forensics.chain_of_custody import ChainOfCustody
+from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
 from app.forensics.event_import import import_jsonl_events, timeline_summary
 from app.memory.store import MemoryStore
@@ -57,11 +58,9 @@ def test_forensic_case_and_evidence_verification(tmp_path: Path) -> None:
     case = CaseManager(str(cases_root)).create_case("Unit test investigation")
     source = tmp_path / "artifact.txt"
     source.write_text("forensic evidence", encoding="utf-8")
-
     manager = EvidenceManager(str(cases_root))
     evidence = manager.register(case["case_id"], str(source))
     verification = manager.verify(case["case_id"], evidence["evidence_id"])
-
     assert verification["all_match"] is True
     assert verification["chain_of_custody_valid"] is True
     assert len(evidence["sha256"]) == 64
@@ -73,7 +72,6 @@ def test_chain_of_custody_detects_tampering(tmp_path: Path) -> None:
     ledger = ChainOfCustody(case_dir)
     ledger.append("test_event", {"value": 1})
     assert ledger.verify() is True
-
     content = ledger.path.read_text(encoding="utf-8").replace('"value": 1', '"value": 2')
     ledger.path.write_text(content, encoding="utf-8")
     assert ledger.verify() is False
@@ -87,10 +85,8 @@ def test_jsonl_events_normalize_into_timeline(tmp_path: Path) -> None:
         '{"timestamp":"2026-08-12T18:05:00+00:00","event_type":"process","summary":"Process started"}\n',
         encoding="utf-8",
     )
-
     result = import_jsonl_events(case_dir, str(source), source_name="testlog", evidence_id="E0001")
     summary = timeline_summary(case_dir)
-
     assert result["events_ingested"] == 2
     assert summary["event_count"] == 2
     assert summary["by_source"] == {"testlog": 2}
@@ -102,6 +98,28 @@ def test_timeline_planner_commands() -> None:
     import_plan = plan_command("import events DFIR-2026-0001 workspace/events.jsonl macos")
     assert import_plan.steps[0].tool == "forensic.import_events"
     assert import_plan.steps[0].arguments["source_name"] == "macos"
-
     timeline_plan = plan_command("timeline DFIR-2026-0001")
     assert timeline_plan.steps[0].tool == "forensic.show_timeline"
+
+
+def test_correlation_finds_relationships_and_network_anomaly(tmp_path: Path) -> None:
+    case_dir = tmp_path / "DFIR-TEST"
+    source = tmp_path / "events.jsonl"
+    source.write_text(
+        '{"timestamp":"2026-08-12T18:00:00Z","event_type":"login","message":"User login"}\n'
+        '{"timestamp":"2026-08-12T18:01:00Z","event_type":"process","message":"Process started"}\n'
+        '{"timestamp":"2026-08-12T18:02:00Z","event_type":"network","message":"Outbound connection"}\n',
+        encoding="utf-8",
+    )
+    import_jsonl_events(case_dir, str(source), source_name="testlog")
+    result = CorrelationEngine(case_dir).analyze(window_seconds=180)
+    assert result["event_count"] == 3
+    assert result["summary"]["relationship_count"] >= 2
+    assert result["summary"]["anomaly_count"] == 1
+    assert result["anomalies"][0]["reason"] == "Outbound or remote network activity"
+
+
+def test_correlation_planner_command() -> None:
+    plan = plan_command("correlate DFIR-2026-0001 180")
+    assert plan.steps[0].tool == "forensic.correlate_case"
+    assert plan.steps[0].arguments["window_seconds"] == 180
