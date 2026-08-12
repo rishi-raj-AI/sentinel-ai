@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import re
@@ -11,12 +10,7 @@ from app.forensics.timeline import TimelineStore
 
 
 class ThreatIntelEngine:
-    """Local IOC inventory and classification without external lookups.
-
-    This deliberately avoids sending case artifacts to third-party services. It
-    inventories observed IPs/domains and registered evidence hashes so an online
-    enrichment provider can be added later with explicit configuration.
-    """
+    """Local IOC inventory and classification without external lookups."""
 
     DOMAIN_RE = re.compile(r"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b")
 
@@ -30,6 +24,8 @@ class ThreatIntelEngine:
             ip = ipaddress.ip_address(value)
         except ValueError:
             return "invalid"
+        if value.startswith(("192.0.2.", "198.51.100.", "203.0.113.")) or value.lower().startswith("2001:db8:"):
+            return "documentation"
         if ip.is_loopback:
             return "loopback"
         if ip.is_link_local:
@@ -38,8 +34,6 @@ class ThreatIntelEngine:
             return "multicast"
         if ip.is_private:
             return "private"
-        if value.startswith(("192.0.2.", "198.51.100.", "203.0.113.")) or value.lower().startswith("2001:db8:"):
-            return "documentation"
         return "public"
 
     def inventory(self, *, max_items: int = 200) -> dict[str, Any]:
@@ -83,12 +77,7 @@ class ThreatIntelEngine:
             for evidence in record.get("evidence", []):
                 sha256 = evidence.get("sha256")
                 if sha256:
-                    hashes.append({
-                        "indicator": str(sha256),
-                        "type": "sha256",
-                        "evidence_id": evidence.get("evidence_id"),
-                        "filename": evidence.get("filename"),
-                    })
+                    hashes.append({"indicator": str(sha256), "type": "sha256", "evidence_id": evidence.get("evidence_id"), "filename": evidence.get("filename")})
 
         def clean(item: dict[str, Any]) -> dict[str, Any]:
             out = dict(item)
