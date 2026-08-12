@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -17,14 +20,16 @@ class ModelProvider(BaseModelProvider):
     the same origin. If native Ollama also returns 404, Sentinel queries
     `/api/tags`, resolves the exact installed model name, and retries once.
 
-    A stale configured model name is tolerated when Ollama exposes exactly one
-    installed model. This is useful when an old shell environment variable
-    overrides Sentinel's persisted local model configuration.
+    Resolution order deliberately prefers Sentinel's persisted local model
+    configuration before falling back to same-family or single-model choices.
+    This prevents a stale shell environment variable such as ``R-Pilot`` from
+    masking a valid model saved by the local setup script.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self.configured_model: str = self.model
+        self.persisted_model: str | None = self._persisted_model_name()
         self.transport: str | None = None
         self.active_endpoint: str | None = None
         self.resolved_model: str | None = None
@@ -43,6 +48,20 @@ class ModelProvider(BaseModelProvider):
     @classmethod
     def _ollama_tags_endpoint(cls, endpoint: str) -> str:
         return cls._origin_endpoint(endpoint, "/api/tags")
+
+    @staticmethod
+    def _persisted_model_name() -> str | None:
+        path = Path(os.getenv("SENTINEL_MODEL_CONFIG", "config/model.json")).expanduser()
+        if not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        model = str(payload.get("model") or "").strip()
+        return model or None
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -99,15 +118,30 @@ class ModelProvider(BaseModelProvider):
     def _resolve_ollama_model(self) -> str | None:
         response = self._get(self._ollama_tags_endpoint(self.endpoint))
         response.raise_for_status()
-        rows = response.json().get("models") or []
-        installed = [str(row.get("name") or row.get("model") or "").strip() for row in rows]
-        installed = [name for name in installed if name]
+        body = response.json()
+        rows = body.get("models") or []
+        installed = [str(row.get("name") or row.get("model") or "").strip() for row in rows if isinstance(row, dict)]
+        installed = list(dict.fromkeys(name for name in installed if name))
         if not installed:
             return None
 
         configured = self.model.strip()
         if configured in installed:
             return configured
+
+        # Prefer the model Sentinel's setup persisted locally. Environment
+        # variables may be stale and take precedence in the base provider.
+        persisted = (self.persisted_model or "").strip()
+        if persisted:
+            if persisted in installed:
+                return persisted
+            persisted_base = persisted.split(":", 1)[0]
+            persisted_matches = [name for name in installed if name.split(":", 1)[0] == persisted_base]
+            if len(persisted_matches) == 1:
+                return persisted_matches[0]
+            persisted_latest = f"{persisted_base}:latest"
+            if persisted_latest in installed:
+                return persisted_latest
 
         configured_base = configured.split(":", 1)[0]
         same_base = [name for name in installed if name.split(":", 1)[0] == configured_base]
@@ -118,8 +152,13 @@ class ModelProvider(BaseModelProvider):
         if latest in installed:
             return latest
 
-        # If this Ollama instance has exactly one model, there is no ambiguity.
-        # Prefer the actually installed model over a stale shell/config value.
+        # Common setup-script default: prefer llama3.2 if it is present even
+        # when a stale environment model name is unrelated and multiple models
+        # are installed. This is deterministic, not an arbitrary first-model pick.
+        for preferred in ("llama3.2:latest", "llama3.2"):
+            if preferred in installed:
+                return preferred
+
         if len(installed) == 1:
             return installed[0]
 
@@ -155,8 +194,6 @@ class ModelProvider(BaseModelProvider):
                 self.model = resolved
                 self.resolved_model = resolved
                 return self._complete_ollama_once(endpoint, system_prompt, user_prompt)
-            # Exact model is already installed yet chat still returned 404. Keep
-            # the original HTTP error because this is no longer a name mismatch.
             raise
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
@@ -186,6 +223,7 @@ class CaseCopilot(CitationCaseCopilot):
     def answer(self, question: str, *, max_sources: int = 12) -> dict[str, Any]:
         result = super().answer(question, max_sources=max_sources)
         result["configured_model"] = getattr(self.provider, "configured_model", getattr(self.provider, "model", None))
+        result["persisted_model"] = getattr(self.provider, "persisted_model", None)
         result["transport"] = getattr(self.provider, "transport", None)
         result["active_endpoint"] = getattr(self.provider, "active_endpoint", None)
         result["resolved_model"] = getattr(self.provider, "resolved_model", None)
