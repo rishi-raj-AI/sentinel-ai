@@ -48,11 +48,16 @@ def test_dashboard_endpoints_and_ui(tmp_path):
     health = client.get("/api/health")
     assert health.status_code == 200
     assert health.json()["mode"] == "local-read-only-dashboard"
+    assert health.json()["copilot"]["grounding"] == "case-retrieval-required"
+
+    copilot_status = client.get("/api/copilot/status")
+    assert copilot_status.status_code == 200
+    assert copilot_status.json()["mode"] in {"deterministic", "model"}
 
     index = client.get("/")
     assert index.status_code == 200
     assert "SENTINEL" in index.text
-    assert "Investigator Assistant" in index.text
+    assert "Investigator Copilot" in index.text
 
     cases = client.get("/api/cases")
     assert cases.status_code == 200
@@ -65,6 +70,7 @@ def test_dashboard_endpoints_and_ui(tmp_path):
     assert payload["stats"]["evidence"] == 1
     assert payload["stats"]["sigma_detections"] >= 1
     assert payload["brief"]["headline"]
+    assert payload["copilot"]["grounding"] == "case-retrieval-required"
 
     timeline = client.get(f"/api/cases/{case_id}/timeline?limit=10")
     assert timeline.status_code == 200
@@ -90,8 +96,11 @@ def test_dashboard_endpoints_and_ui(tmp_path):
 
     chat = client.post(f"/api/cases/{case_id}/chat", json={"question": "What network activity should I review?"})
     assert chat.status_code == 200
-    assert "4444" in chat.json()["answer"]
-    assert "network_intelligence" in chat.json()["sources"]
+    chat_payload = chat.json()
+    assert "4444" in chat_payload["answer"]
+    assert chat_payload["source_count"] > 0
+    assert any(source["kind"] == "network" for source in chat_payload["sources"])
+    assert chat_payload["grounding"]
 
 
 def test_dashboard_rejects_unknown_case_and_report_traversal(tmp_path):
