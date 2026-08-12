@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 import psutil
 
+from app.tools.forensics import create_case, register_evidence, show_case, verify_evidence
 from app.tools.memory import forget, list_memories, recall, remember
 
 ToolFunction = Callable[..., Any]
@@ -71,6 +72,10 @@ TOOLS: dict[str, ToolFunction] = {
     "filesystem.write_text_file": write_text_file,
     "filesystem.create_directory": create_directory,
     "forensic.sha256_file": sha256_file,
+    "forensic.create_case": create_case,
+    "forensic.register_evidence": register_evidence,
+    "forensic.verify_evidence": verify_evidence,
+    "forensic.show_case": show_case,
     "system.disk_usage": disk_usage,
     "system.info": system_info,
     "memory.remember": remember,
