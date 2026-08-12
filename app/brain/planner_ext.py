@@ -48,4 +48,13 @@ def plan_command(command: str) -> CommandPlan:
                 arguments["report_name"] = parts[3]
             return CommandPlan(intent="export_case_report", steps=[ToolCall(tool="forensic.export_case_report", arguments=arguments)])
 
+    if lower.startswith("verify report ") or lower.startswith("report verify "):
+        prefix = "verify report " if lower.startswith("verify report ") else "report verify "
+        parts = text[len(prefix):].strip().split(maxsplit=1)
+        if len(parts) == 2:
+            return CommandPlan(
+                intent="verify_case_report",
+                steps=[ToolCall(tool="forensic.verify_case_report", arguments={"case_id": parts[0], "report_name": parts[1]})],
+            )
+
     return base_plan_command(command)
