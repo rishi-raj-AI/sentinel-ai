@@ -102,6 +102,13 @@ def plan_command(command: str) -> CommandPlan:
             if len(parts) >= 2 and parts[1].isdigit():
                 arguments["max_candidates"] = int(parts[1])
             return CommandPlan(intent="attack_mapping", steps=[ToolCall(tool="forensic.attack_mapping", arguments=arguments)])
+    if lower.startswith("attack chain "):
+        parts = text[len("attack chain ") :].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2 and parts[1].isdigit():
+                arguments["max_candidates"] = int(parts[1])
+            return CommandPlan(intent="attack_chain", steps=[ToolCall(tool="forensic.attack_chain", arguments=arguments)])
     if lower.startswith("correlate ") or lower.startswith("analyze case "):
         prefix = "correlate " if lower.startswith("correlate ") else "analyze case "
         parts = text[len(prefix) :].strip().split()
