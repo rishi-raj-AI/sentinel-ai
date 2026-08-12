@@ -77,6 +77,23 @@ def plan_command(command: str) -> CommandPlan:
             if len(parts) >= 3 and parts[2].isdigit():
                 arguments["max_edges"] = int(parts[2])
             return CommandPlan(intent="evidence_graph", steps=[ToolCall(tool="forensic.evidence_graph", arguments=arguments)])
+    if lower.startswith("graph neighbors "):
+        parts = text[len("graph neighbors ") :].strip().split(maxsplit=3)
+        if len(parts) >= 2:
+            arguments: dict[str, object] = {"case_id": parts[0], "query": parts[1]}
+            if len(parts) >= 3 and parts[2].isdigit():
+                arguments["depth"] = int(parts[2])
+            if len(parts) == 4 and parts[3].isdigit():
+                arguments["max_results"] = int(parts[3])
+            return CommandPlan(intent="graph_neighbors", steps=[ToolCall(tool="forensic.graph_neighbors", arguments=arguments)])
+    if lower.startswith("graph trace "):
+        body = text[len("graph trace ") :].strip()
+        parts = body.split()
+        if len(parts) >= 3:
+            arguments: dict[str, object] = {"case_id": parts[0], "source": parts[1], "target": parts[2]}
+            if len(parts) >= 4 and parts[3].isdigit():
+                arguments["max_hops"] = int(parts[3])
+            return CommandPlan(intent="graph_trace", steps=[ToolCall(tool="forensic.graph_trace", arguments=arguments)])
     if lower.startswith("correlate ") or lower.startswith("analyze case "):
         prefix = "correlate " if lower.startswith("correlate ") else "analyze case "
         parts = text[len(prefix) :].strip().split()
