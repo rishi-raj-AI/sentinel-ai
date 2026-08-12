@@ -11,6 +11,7 @@ def copilot_status():
         "mode": "model" if provider.configured else "deterministic",
         "model": provider.model or None,
         "endpoint_configured": bool(provider.endpoint),
+        "config_source": provider.config_source,
         "grounding": "case-retrieval-required",
     }
 
