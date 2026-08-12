@@ -15,12 +15,16 @@ class ModelProvider(BaseModelProvider):
     Uses the configured OpenAI-compatible endpoint first. If that endpoint
     returns HTTP 404, Sentinel retries Ollama's native `/api/chat` endpoint on
     the same origin. If native Ollama also returns 404, Sentinel queries
-    `/api/tags`, resolves the exact installed model name (for example
-    `llama3.2:latest` for configured `llama3.2`), and retries once.
+    `/api/tags`, resolves the exact installed model name, and retries once.
+
+    A stale configured model name is tolerated when Ollama exposes exactly one
+    installed model. This is useful when an old shell environment variable
+    overrides Sentinel's persisted local model configuration.
     """
 
     def __init__(self) -> None:
         super().__init__()
+        self.configured_model: str = self.model
         self.transport: str | None = None
         self.active_endpoint: str | None = None
         self.resolved_model: str | None = None
@@ -96,7 +100,8 @@ class ModelProvider(BaseModelProvider):
         response = self._get(self._ollama_tags_endpoint(self.endpoint))
         response.raise_for_status()
         rows = response.json().get("models") or []
-        installed = [str(row.get("name") or "").strip() for row in rows if row.get("name")]
+        installed = [str(row.get("name") or row.get("model") or "").strip() for row in rows]
+        installed = [name for name in installed if name]
         if not installed:
             return None
 
@@ -112,6 +117,11 @@ class ModelProvider(BaseModelProvider):
         latest = f"{configured_base}:latest"
         if latest in installed:
             return latest
+
+        # If this Ollama instance has exactly one model, there is no ambiguity.
+        # Prefer the actually installed model over a stale shell/config value.
+        if len(installed) == 1:
+            return installed[0]
 
         return None
 
@@ -137,11 +147,17 @@ class ModelProvider(BaseModelProvider):
             if exc.response.status_code != 404:
                 raise
             resolved = self._resolve_ollama_model()
-            if not resolved or resolved == self.model:
-                raise
-            self.model = resolved
-            self.resolved_model = resolved
-            return self._complete_ollama_once(endpoint, system_prompt, user_prompt)
+            if not resolved:
+                raise RuntimeError(
+                    f"Ollama returned 404 for configured model '{self.model}' and no installed model could be resolved"
+                ) from exc
+            if resolved != self.model:
+                self.model = resolved
+                self.resolved_model = resolved
+                return self._complete_ollama_once(endpoint, system_prompt, user_prompt)
+            # Exact model is already installed yet chat still returned 404. Keep
+            # the original HTTP error because this is no longer a name mismatch.
+            raise
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
         if not self.configured:
@@ -169,9 +185,12 @@ class CaseCopilot(CitationCaseCopilot):
 
     def answer(self, question: str, *, max_sources: int = 12) -> dict[str, Any]:
         result = super().answer(question, max_sources=max_sources)
+        result["configured_model"] = getattr(self.provider, "configured_model", getattr(self.provider, "model", None))
         result["transport"] = getattr(self.provider, "transport", None)
         result["active_endpoint"] = getattr(self.provider, "active_endpoint", None)
         result["resolved_model"] = getattr(self.provider, "resolved_model", None)
+        if result.get("mode") == "model":
+            result["model"] = getattr(self.provider, "model", result.get("model"))
         return result
 
 
