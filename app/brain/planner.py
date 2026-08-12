@@ -116,6 +116,9 @@ def plan_command(command: str) -> CommandPlan:
             return CommandPlan(intent="yara_scan_evidence", steps=[ToolCall(tool="forensic.yara_scan_evidence", arguments={"case_id": parts[0], "evidence_id": parts[1], "rule_path": parts[2]})])
     if lower in {"evtx status", "check evtx"}:
         return CommandPlan(intent="evtx_status", steps=[ToolCall(tool="forensic.evtx_status")])
+    if lower.startswith("create sample evtx"):
+        path = text[len("create sample evtx") :].strip() or "workspace/sample.evtx"
+        return CommandPlan(intent="create_sample_evtx", steps=[ToolCall(tool="forensic.create_sample_evtx", arguments={"path": path})])
     if lower.startswith("evtx evidence "):
         parts = text[len("evtx evidence ") :].strip().split()
         if len(parts) >= 2:
