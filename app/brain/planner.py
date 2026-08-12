@@ -94,6 +94,14 @@ def plan_command(command: str) -> CommandPlan:
             if len(parts) >= 4 and parts[3].isdigit():
                 arguments["max_hops"] = int(parts[3])
             return CommandPlan(intent="graph_trace", steps=[ToolCall(tool="forensic.graph_trace", arguments=arguments)])
+    if lower.startswith("attack mapping ") or lower.startswith("mitre mapping "):
+        prefix = "attack mapping " if lower.startswith("attack mapping ") else "mitre mapping "
+        parts = text[len(prefix) :].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2 and parts[1].isdigit():
+                arguments["max_candidates"] = int(parts[1])
+            return CommandPlan(intent="attack_mapping", steps=[ToolCall(tool="forensic.attack_mapping", arguments=arguments)])
     if lower.startswith("correlate ") or lower.startswith("analyze case "):
         prefix = "correlate " if lower.startswith("correlate ") else "analyze case "
         parts = text[len(prefix) :].strip().split()
