@@ -11,6 +11,7 @@ from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
 from app.forensics.event_import import import_jsonl_events, timeline_summary
 from app.forensics.macos_logs import MacOSLogAdapter
+from app.forensics.timeline import TimelineEvent, TimelineStore
 from app.memory.store import MemoryStore
 
 
@@ -118,6 +119,54 @@ def test_correlation_finds_relationships_and_network_anomaly(tmp_path: Path) -> 
     assert result["summary"]["relationship_count"] >= 2
     assert result["summary"]["anomaly_count"] == 1
     assert result["anomalies"][0]["reason"] == "Outbound or remote network activity"
+
+
+def test_correlation_deduplicates_noisy_events(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "DFIR-NOISE")
+    for index in range(100):
+        store.append(TimelineEvent(
+            timestamp=f"2026-08-12T18:42:36.{index:06d}+00:00",
+            source="macos_unified_log",
+            event_type="info",
+            summary="WindowServer: repeated status message",
+            details={},
+        ))
+    store.append(TimelineEvent(
+        timestamp="2026-08-12T18:42:38+00:00",
+        source="macos_unified_log",
+        event_type="network",
+        summary="Outbound connection",
+        details={},
+    ))
+
+    result = CorrelationEngine(tmp_path / "DFIR-NOISE").analyze(window_seconds=60)
+    assert result["raw_event_count"] == 101
+    assert result["duplicates_removed"] >= 99
+    assert result["event_count"] <= 2
+    assert result["summary"]["anomaly_count"] == 1
+
+
+def test_correlation_caps_large_timelines(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "DFIR-LARGE")
+    for index in range(40):
+        store.append(TimelineEvent(
+            timestamp=f"2026-08-12T18:{index // 60:02d}:{index % 60:02d}+00:00",
+            source="test",
+            event_type="process" if index % 2 else "login",
+            summary=f"event-{index}",
+            details={},
+        ))
+    result = CorrelationEngine(tmp_path / "DFIR-LARGE").analyze(
+        window_seconds=60,
+        max_events=10,
+        max_relationships=5,
+        sequence_limit=4,
+        dedup_seconds=0,
+    )
+    assert result["event_count"] == 10
+    assert result["analysis_truncated"] is True
+    assert len(result["sequence"]) == 4
+    assert len(result["relationships"]) <= 5
 
 
 def test_correlation_planner_command() -> None:
