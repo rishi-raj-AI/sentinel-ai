@@ -57,5 +57,12 @@ def plan_command(command: str) -> CommandPlan:
             if len(parts) >= 2 and parts[1].isdigit():
                 arguments["window_seconds"] = int(parts[1])
             return CommandPlan(intent="correlate_forensic_case", steps=[ToolCall(tool="forensic.correlate_case", arguments=arguments)])
+    if lower.startswith("collect macos logs "):
+        parts = text[len("collect macos logs ") :].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2:
+                arguments["last"] = parts[1]
+            return CommandPlan(intent="collect_macos_logs", steps=[ToolCall(tool="forensic.collect_macos_logs", arguments=arguments)])
 
     return CommandPlan(intent="unknown", requires_action=False, steps=[])
