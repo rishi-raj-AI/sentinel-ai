@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import psutil
 
-from app.tools.forensics import analyze_pcap_evidence, collect_macos_logs, correlate_case, create_case, create_sample_pcap, import_events, investigate_case, register_evidence, run_volatility, run_volatility_evidence, show_case, show_timeline, tshark_status, verify_evidence, volatility_status
+from app.tools.forensics import analyze_pcap_evidence, collect_macos_logs, correlate_case, create_case, create_sample_pcap, import_events, investigate_case, network_intelligence, register_evidence, run_volatility, run_volatility_evidence, show_case, show_timeline, tshark_status, verify_evidence, volatility_status
 from app.tools.memory import forget, list_memories, recall, remember
 
 ToolFunction = Callable[..., Any]
@@ -71,6 +71,7 @@ TOOLS: dict[str, ToolFunction] = {
     "forensic.show_timeline": show_timeline,
     "forensic.correlate_case": correlate_case,
     "forensic.investigate_case": investigate_case,
+    "forensic.network_intelligence": network_intelligence,
     "forensic.collect_macos_logs": collect_macos_logs,
     "forensic.volatility_status": volatility_status,
     "forensic.run_volatility": run_volatility,
