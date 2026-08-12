@@ -8,6 +8,18 @@ def plan_command(command: str) -> CommandPlan:
     text = command.strip()
     lower = text.lower()
 
+    if lower in {"copilot status", "case copilot status"}:
+        return CommandPlan(intent="copilot_status", steps=[ToolCall(tool="forensic.copilot_status")])
+
+    if lower.startswith("copilot ask ") or lower.startswith("ask copilot "):
+        prefix = "copilot ask " if lower.startswith("copilot ask ") else "ask copilot "
+        parts = text[len(prefix):].strip().split(maxsplit=1)
+        if len(parts) == 2:
+            return CommandPlan(
+                intent="copilot_ask",
+                steps=[ToolCall(tool="forensic.copilot_ask", arguments={"case_id": parts[0], "question": parts[1]})],
+            )
+
     if lower.startswith("sigma analyze ") or lower.startswith("sigma scan "):
         prefix = "sigma analyze " if lower.startswith("sigma analyze ") else "sigma scan "
         parts = text[len(prefix):].strip().split(maxsplit=2)
