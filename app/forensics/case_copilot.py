@@ -11,7 +11,6 @@ import httpx
 
 from app.forensics.attack_mapping import AttackMappingEngine
 from app.forensics.case_reasoning import CaseReasoningEngine
-from app.forensics.evidence_graph import EvidenceGraphEngine
 from app.forensics.network_intelligence import NetworkIntelligenceEngine
 from app.forensics.sigma_engine import SigmaEngine
 from app.forensics.timeline import TimelineStore
@@ -126,9 +125,8 @@ class CaseCopilot:
 
         sigma = SigmaEngine(self.case_dir).analyze(self.sigma_rules, max_detections=100)
         for idx, row in enumerate(sigma.get("detections", []), start=1):
-            sid = f"SIGMA:{row.get('rule_id')}:{idx}"
             sources.append(CopilotSource(
-                source_id=sid,
+                source_id=f"SIGMA:{row.get('rule_id')}:{idx}",
                 kind="sigma",
                 title=str(row.get("title") or row.get("rule_id") or "Sigma detection"),
                 text=f"Sigma detection level={row.get('level')} evidence={row.get('evidence_id')} matched={row.get('matched_selections')} tags={row.get('tags')}",
@@ -231,6 +229,7 @@ class CaseCopilot:
             type_boosts.add("brief")
 
         scored: list[tuple[int, CopilotSource]] = []
+        ip_hits = re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", question)
         for source in sources:
             blob = self._source_blob(source)
             overlap = sum(1 for term in terms if term in blob)
@@ -241,7 +240,6 @@ class CaseCopilot:
                 score += 2
             if source.evidence_id and source.evidence_id.lower() in q:
                 score += 12
-            ip_hits = re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", question)
             if any(ip in blob for ip in ip_hits):
                 score += 12
             scored.append((score, source))
@@ -279,6 +277,16 @@ class CaseCopilot:
         )
         return f"QUESTION:\n{question}\n\nCASE SOURCES:\n{rendered}"
 
+    @staticmethod
+    def _validate_model_answer(answer: str, sources: list[CopilotSource]) -> None:
+        allowed = {source.source_id for source in sources}
+        cited = set(re.findall(r"\[([^\[\]\n]+)\]", answer))
+        if not cited:
+            raise RuntimeError("Model answer contained no Sentinel source citations")
+        unknown = cited - allowed
+        if unknown:
+            raise RuntimeError(f"Model answer cited unavailable sources: {sorted(unknown)}")
+
     def answer(self, question: str, *, max_sources: int = 12) -> dict[str, Any]:
         text = question.strip()
         if not text:
@@ -290,9 +298,10 @@ class CaseCopilot:
         if self.provider.configured:
             try:
                 answer = self.provider.complete(self._system_prompt(), self._user_prompt(text, sources))
+                self._validate_model_answer(answer, sources)
                 mode = "model"
                 model_name = self.provider.model
-            except Exception as exc:  # fallback is intentional; case access remains available offline
+            except Exception as exc:
                 error = f"model_fallback: {type(exc).__name__}: {exc}"
                 answer = self._deterministic_answer(text, sources)
         else:
