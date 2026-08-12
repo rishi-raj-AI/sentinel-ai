@@ -5,6 +5,7 @@ from pathlib import Path
 from app.forensics.case_manager import CaseManager
 from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
+from app.forensics.evidence_graph import EvidenceGraphEngine
 from app.forensics.event_import import import_jsonl_events, timeline_summary
 from app.forensics.investigation import InvestigationEngine
 from app.forensics.macos_logs import MacOSLogAdapter
@@ -48,6 +49,12 @@ def correlate_case(case_id: str, window_seconds: int = 300):
     return CorrelationEngine(case_dir).analyze(window_seconds=window_seconds)
 
 
+def evidence_graph(case_id: str, max_nodes: int = 1000, max_edges: int = 2000):
+    case_dir = CaseManager().root / case_id
+    CaseManager().load_case(case_id)
+    return EvidenceGraphEngine(case_dir).build(max_nodes=max_nodes, max_edges=max_edges)
+
+
 def _is_packet_level_network_finding(finding: dict) -> bool:
     events = finding.get("events") or []
     if not events:
@@ -68,9 +75,6 @@ def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int 
     )
     network = NetworkIntelligenceEngine(case_dir).analyze(max_flows=max_findings)
 
-    # Packet-level tshark findings are represented more usefully by the aggregated
-    # flow-level network intelligence below. Keep non-tshark network findings,
-    # including manually imported/synthetic case events, for cross-source chains.
     result["findings"] = [
         finding
         for finding in result.get("findings", [])
