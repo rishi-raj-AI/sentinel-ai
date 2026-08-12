@@ -51,10 +51,48 @@ def correlate_case(case_id: str, window_seconds: int = 300):
 def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int = 25):
     case_dir = CaseManager().root / case_id
     CaseManager().load_case(case_id)
-    return InvestigationEngine(case_dir).analyze(
+
+    result = InvestigationEngine(case_dir).analyze(
         window_seconds=window_seconds,
         max_findings=max_findings,
     )
+    network = NetworkIntelligenceEngine(case_dir).analyze(max_flows=max_findings)
+
+    aggregated_findings: list[dict] = []
+    for flow in network["findings"]["public_destination_flows"]:
+        aggregated_findings.append(
+            {
+                "title": "Public destination network flow",
+                "severity": "medium",
+                "confidence": "medium",
+                "reason": f"{flow.get('src')}:{flow.get('src_port')} -> {flow.get('dst')}:{flow.get('dst_port')}",
+                "flow": flow,
+            }
+        )
+    for flow in network["findings"]["unusual_destination_ports"]:
+        aggregated_findings.append(
+            {
+                "title": "Unusual destination port",
+                "severity": "medium",
+                "confidence": "medium",
+                "reason": f"Network flow used destination port {flow.get('dst_port')}",
+                "flow": flow,
+            }
+        )
+
+    result["network_summary"] = {
+        "network_event_count": network["network_event_count"],
+        "network_events_ignored": network["network_events_ignored"],
+        "flow_count": network["flow_count"],
+        "dns_queries": network["dns_queries"],
+        "http_hosts": network["http_hosts"],
+        "tls_sni": network["tls_sni"],
+        "source_scopes": network["source_scopes"],
+        "destination_scopes": network["destination_scopes"],
+    }
+    result["network_findings"] = aggregated_findings[:max_findings]
+    result["summary"]["network_finding_count"] = len(result["network_findings"])
+    return result
 
 
 def network_intelligence(case_id: str, max_flows: int = 100):
