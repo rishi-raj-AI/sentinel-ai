@@ -15,9 +15,24 @@ def plan_command(command: str) -> CommandPlan:
             arguments: dict[str, object] = {"case_id": parts[0], "rule_path": parts[1]}
             if len(parts) == 3 and parts[2].isdigit():
                 arguments["max_detections"] = int(parts[2])
-            return CommandPlan(
-                intent="sigma_analyze",
-                steps=[ToolCall(tool="forensic.sigma_analyze", arguments=arguments)],
-            )
+            return CommandPlan(intent="sigma_analyze", steps=[ToolCall(tool="forensic.sigma_analyze", arguments=arguments)])
+
+    if lower.startswith("case brief ") or lower.startswith("investigation brief "):
+        prefix = "case brief " if lower.startswith("case brief ") else "investigation brief "
+        parts = text[len(prefix):].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2 and parts[1].isdigit():
+                arguments["max_items"] = int(parts[1])
+            return CommandPlan(intent="case_brief", steps=[ToolCall(tool="forensic.case_brief", arguments=arguments)])
+
+    if lower.startswith("threat intel ") or lower.startswith("ioc inventory "):
+        prefix = "threat intel " if lower.startswith("threat intel ") else "ioc inventory "
+        parts = text[len(prefix):].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2 and parts[1].isdigit():
+                arguments["max_items"] = int(parts[1])
+            return CommandPlan(intent="threat_intel_inventory", steps=[ToolCall(tool="forensic.threat_intel_inventory", arguments=arguments)])
 
     return base_plan_command(command)
