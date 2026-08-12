@@ -1,0 +1,5 @@
+SENTINEL_SYNTHETIC_MEMORY_IMAGE
+purpose=registration-and-integrity-pipeline-test
+format=not-a-real-windows-memory-dump
+created_for=Sentinel-AI
+note=Volatility-Windows-plugins-should-reject-this-file
