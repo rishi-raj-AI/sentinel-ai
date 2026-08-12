@@ -5,7 +5,7 @@ import json
 import typer
 from rich import print
 
-from app.brain.planner import plan_command
+from app.brain.planner_ext import plan_command
 from app.executor import ConfirmationRequired, Executor
 
 app = typer.Typer(help="Sentinel AI local assistant")
