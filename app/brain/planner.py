@@ -59,6 +59,14 @@ def plan_command(command: str) -> CommandPlan:
             if len(parts) >= 3 and parts[2].isdigit():
                 arguments["max_findings"] = int(parts[2])
             return CommandPlan(intent="investigate_forensic_case", steps=[ToolCall(tool="forensic.investigate_case", arguments=arguments)])
+    if lower.startswith("network intelligence ") or lower.startswith("network summary "):
+        prefix = "network intelligence " if lower.startswith("network intelligence ") else "network summary "
+        parts = text[len(prefix) :].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2 and parts[1].isdigit():
+                arguments["max_flows"] = int(parts[1])
+            return CommandPlan(intent="network_intelligence", steps=[ToolCall(tool="forensic.network_intelligence", arguments=arguments)])
     if lower.startswith("correlate ") or lower.startswith("analyze case "):
         prefix = "correlate " if lower.startswith("correlate ") else "analyze case "
         parts = text[len(prefix) :].strip().split()
