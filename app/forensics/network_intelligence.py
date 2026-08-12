@@ -47,6 +47,16 @@ class NetworkIntelligenceEngine:
     def _port(details: dict[str, Any], side: str) -> str | None:
         return details.get(f"tcp_{side}port") or details.get(f"udp_{side}port")
 
+    @staticmethod
+    def _primary_protocol(protocols: list[str] | set[str]) -> str | None:
+        tokens: list[str] = []
+        for value in protocols:
+            tokens.extend(part.strip().lower() for part in str(value).split(":") if part.strip())
+        for candidate in ("tcp", "udp", "icmp", "icmpv6"):
+            if candidate in tokens:
+                return candidate.upper()
+        return tokens[-1].upper() if tokens else None
+
     def analyze(self, *, max_flows: int = 100) -> dict[str, Any]:
         events = [event for event in self.store.read() if event.get("event_type") == "network"]
         flows: dict[tuple[str, str, str, str], dict[str, Any]] = {}
@@ -104,6 +114,7 @@ class NetworkIntelligenceEngine:
             rendered = dict(flow)
             rendered["evidence_ids"] = sorted(flow["evidence_ids"])
             rendered["protocols"] = sorted(flow["protocols"])
+            rendered["protocol"] = self._primary_protocol(flow["protocols"])
             rendered["src_scope"] = self._ip_scope(flow["src"])
             rendered["dst_scope"] = self._ip_scope(flow["dst"])
             rendered_flows.append(rendered)
