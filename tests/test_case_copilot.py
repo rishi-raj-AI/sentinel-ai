@@ -83,7 +83,7 @@ def test_copilot_rejects_uncited_model_answer(tmp_path):
     case_dir, _ = _case(tmp_path)
     result = CaseCopilot(case_dir, provider=UngroundedProvider()).answer("Is this malicious?")
     assert result["mode"] == "deterministic"
-    assert "no Sentinel source citations" in result["provider_error"]
+    assert "valid retrieved Sentinel citations" in result["provider_error"]
 
 
 def test_planner_routes_copilot_commands():
