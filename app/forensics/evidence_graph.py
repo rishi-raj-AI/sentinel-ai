@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -97,6 +98,34 @@ class EvidenceGraphEngine:
             seen_edges.add(key)
             edges.append(GraphEdge(source, target, relation, attributes))
 
+        # Registered evidence belongs in the graph even before any analyzer emits
+        # timeline events for it. This makes integrity-registered evidence directly
+        # discoverable and gives later YARA/PCAP/Volatility events stable roots.
+        case_json = self.case_dir / "case.json"
+        if case_json.is_file():
+            try:
+                case_record = json.loads(case_json.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                case_record = {}
+            for item in case_record.get("evidence", []):
+                evidence_id = item.get("evidence_id")
+                if not evidence_id:
+                    continue
+                evidence_node = add_node(
+                    "evidence",
+                    str(evidence_id),
+                    filename=item.get("filename"),
+                    sha256=item.get("sha256"),
+                    size_bytes=item.get("size_bytes"),
+                    registered_at=item.get("registered_at"),
+                    original_path=item.get("original_path"),
+                    stored_path=item.get("stored_path"),
+                )
+                stored_path = item.get("stored_path")
+                if stored_path:
+                    file_node = add_node("file", str(stored_path), preserved=True)
+                    add_edge(evidence_node, file_node, "stored_as", registered_at=item.get("registered_at"))
+
         process_by_pid: dict[str, str] = {}
 
         for event in events:
@@ -121,8 +150,6 @@ class EvidenceGraphEngine:
                 evidence_node = add_node("evidence", str(evidence_id))
                 add_edge(evidence_node, event_node, "contains", timestamp=timestamp)
 
-            # YARA findings become explicit detection-rule entities linked back to
-            # both the event and the preserved evidence that produced the match.
             if event_type == "yara_match" or source == "yara":
                 rule = details.get("rule")
                 if rule:
@@ -143,7 +170,6 @@ class EvidenceGraphEngine:
                     if evidence_node:
                         add_edge(evidence_node, file_node, "stored_as", timestamp=timestamp)
 
-            # Adapter-independent process/PID extraction, including Volatility output.
             process_name = self._process_name(event)
             pid = self._pid(details)
             ppid = self._ppid(details)
