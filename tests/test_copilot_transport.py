@@ -12,20 +12,26 @@ class QueueProvider(ModelProvider):
         self.config_source = "test"
         self.transport = None
         self.active_endpoint = None
+        self.resolved_model = None
         self.calls = []
         self.responses = []
+        self.get_responses = []
 
     @property
     def configured(self):
         return True
 
     def _post(self, endpoint, payload):
-        self.calls.append((endpoint, payload))
+        self.calls.append(("POST", endpoint, payload))
         return self.responses.pop(0)
 
+    def _get(self, endpoint):
+        self.calls.append(("GET", endpoint, None))
+        return self.get_responses.pop(0)
 
-def response(status, body, url):
-    request = httpx.Request("POST", url)
+
+def response(status, body, url, method="POST"):
+    request = httpx.Request(method, url)
     return httpx.Response(status, json=body, request=request)
 
 
@@ -41,11 +47,11 @@ def test_provider_falls_back_to_ollama_native_on_openai_404():
     assert result == "Grounded [FLOW:2]."
     assert provider.transport == "ollama-native"
     assert provider.active_endpoint == "http://127.0.0.1:11434/api/chat"
-    assert [call[0] for call in provider.calls] == [
-        "http://127.0.0.1:11434/v1/chat/completions",
-        "http://127.0.0.1:11434/api/chat",
+    assert [(method, endpoint) for method, endpoint, _ in provider.calls] == [
+        ("POST", "http://127.0.0.1:11434/v1/chat/completions"),
+        ("POST", "http://127.0.0.1:11434/api/chat"),
     ]
-    assert provider.calls[1][1]["stream"] is False
+    assert provider.calls[1][2]["stream"] is False
 
 
 def test_provider_keeps_openai_transport_when_route_succeeds():
@@ -74,3 +80,33 @@ def test_provider_accepts_explicit_ollama_native_endpoint():
     assert provider.transport == "ollama-native"
     assert provider.active_endpoint == provider.endpoint
     assert len(provider.calls) == 1
+
+
+def test_provider_resolves_exact_ollama_model_after_native_404():
+    provider = QueueProvider("http://127.0.0.1:11434/api/chat")
+    provider.responses = [
+        response(404, {"error": "model not found"}, provider.endpoint),
+        response(200, {"message": {"content": "Resolved [EVIDENCE:E0003]."}}, provider.endpoint),
+    ]
+    provider.get_responses = [
+        response(
+            200,
+            {"models": [{"name": "llama3.2:latest"}]},
+            "http://127.0.0.1:11434/api/tags",
+            method="GET",
+        )
+    ]
+
+    result = provider.complete("system", "user")
+
+    assert result == "Resolved [EVIDENCE:E0003]."
+    assert provider.model == "llama3.2:latest"
+    assert provider.resolved_model == "llama3.2:latest"
+    assert provider.transport == "ollama-native"
+    assert provider.active_endpoint == provider.endpoint
+    assert [(method, endpoint) for method, endpoint, _ in provider.calls] == [
+        ("POST", "http://127.0.0.1:11434/api/chat"),
+        ("GET", "http://127.0.0.1:11434/api/tags"),
+        ("POST", "http://127.0.0.1:11434/api/chat"),
+    ]
+    assert provider.calls[-1][2]["model"] == "llama3.2:latest"
