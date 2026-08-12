@@ -114,6 +114,15 @@ def plan_command(command: str) -> CommandPlan:
         parts = text[len("yara evidence ") :].strip().split(maxsplit=2)
         if len(parts) == 3:
             return CommandPlan(intent="yara_scan_evidence", steps=[ToolCall(tool="forensic.yara_scan_evidence", arguments={"case_id": parts[0], "evidence_id": parts[1], "rule_path": parts[2]})])
+    if lower in {"evtx status", "check evtx"}:
+        return CommandPlan(intent="evtx_status", steps=[ToolCall(tool="forensic.evtx_status")])
+    if lower.startswith("evtx evidence "):
+        parts = text[len("evtx evidence ") :].strip().split()
+        if len(parts) >= 2:
+            arguments: dict[str, object] = {"case_id": parts[0], "evidence_id": parts[1]}
+            if len(parts) >= 3 and parts[2].isdigit():
+                arguments["max_events"] = int(parts[2])
+            return CommandPlan(intent="evtx_analyze_evidence", steps=[ToolCall(tool="forensic.evtx_analyze_evidence", arguments=arguments)])
     if lower.startswith("correlate ") or lower.startswith("analyze case "):
         prefix = "correlate " if lower.startswith("correlate ") else "analyze case "
         parts = text[len(prefix) :].strip().split()
