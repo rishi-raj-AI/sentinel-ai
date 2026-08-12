@@ -13,6 +13,8 @@ TOOL_RISK: dict[str, RiskLevel] = {
     "forensic.register_evidence": RiskLevel.MODIFICATION,
     "forensic.verify_evidence": RiskLevel.READ,
     "forensic.show_case": RiskLevel.READ,
+    "forensic.import_events": RiskLevel.MODIFICATION,
+    "forensic.show_timeline": RiskLevel.READ,
     "system.disk_usage": RiskLevel.READ,
     "system.info": RiskLevel.READ,
     "memory.remember": RiskLevel.MODIFICATION,
