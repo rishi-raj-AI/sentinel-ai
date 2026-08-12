@@ -87,8 +87,7 @@ def plan_command(command: str) -> CommandPlan:
                 arguments["max_results"] = int(parts[3])
             return CommandPlan(intent="graph_neighbors", steps=[ToolCall(tool="forensic.graph_neighbors", arguments=arguments)])
     if lower.startswith("graph trace "):
-        body = text[len("graph trace ") :].strip()
-        parts = body.split()
+        parts = text[len("graph trace ") :].strip().split()
         if len(parts) >= 3:
             arguments: dict[str, object] = {"case_id": parts[0], "source": parts[1], "target": parts[2]}
             if len(parts) >= 4 and parts[3].isdigit():
@@ -109,6 +108,12 @@ def plan_command(command: str) -> CommandPlan:
             if len(parts) >= 2 and parts[1].isdigit():
                 arguments["max_candidates"] = int(parts[1])
             return CommandPlan(intent="attack_chain", steps=[ToolCall(tool="forensic.attack_chain", arguments=arguments)])
+    if lower in {"yara status", "check yara"}:
+        return CommandPlan(intent="yara_status", steps=[ToolCall(tool="forensic.yara_status")])
+    if lower.startswith("yara evidence "):
+        parts = text[len("yara evidence ") :].strip().split(maxsplit=2)
+        if len(parts) == 3:
+            return CommandPlan(intent="yara_scan_evidence", steps=[ToolCall(tool="forensic.yara_scan_evidence", arguments={"case_id": parts[0], "evidence_id": parts[1], "rule_path": parts[2]})])
     if lower.startswith("correlate ") or lower.startswith("analyze case "):
         prefix = "correlate " if lower.startswith("correlate ") else "analyze case "
         parts = text[len(prefix) :].strip().split()
