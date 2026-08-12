@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument("--reload", action="store_true", help="Enable development auto-reload")
     args = parser.parse_args()
     uvicorn.run(
-        "app.web.dashboard:create_dashboard_app",
+        "app.web:create_dashboard_app",
         factory=True,
         host=args.host,
         port=args.port,
