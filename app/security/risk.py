@@ -18,6 +18,8 @@ TOOL_RISK: dict[str, RiskLevel] = {
     "forensic.correlate_case": RiskLevel.READ,
     "forensic.investigate_case": RiskLevel.READ,
     "forensic.collect_macos_logs": RiskLevel.MODIFICATION,
+    "forensic.volatility_status": RiskLevel.READ,
+    "forensic.run_volatility": RiskLevel.MODIFICATION,
     "system.disk_usage": RiskLevel.READ,
     "system.info": RiskLevel.READ,
     "memory.remember": RiskLevel.MODIFICATION,
