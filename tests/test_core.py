@@ -10,6 +10,7 @@ from app.forensics.chain_of_custody import ChainOfCustody
 from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
 from app.forensics.event_import import import_jsonl_events, timeline_summary
+from app.forensics.macos_logs import MacOSLogAdapter
 from app.memory.store import MemoryStore
 
 
@@ -123,3 +124,26 @@ def test_correlation_planner_command() -> None:
     plan = plan_command("correlate DFIR-2026-0001 180")
     assert plan.steps[0].tool == "forensic.correlate_case"
     assert plan.steps[0].arguments["window_seconds"] == 180
+
+
+def test_macos_log_record_normalizes() -> None:
+    event = MacOSLogAdapter._normalize({
+        "timestamp": "2026-08-12T18:30:00.000000+01:00",
+        "process": "loginwindow",
+        "processID": 123,
+        "messageType": "Default",
+        "eventMessage": "Session event",
+        "subsystem": "com.apple.loginwindow",
+        "category": "session",
+    })
+    assert event is not None
+    assert event.source == "macos_unified_log"
+    assert event.event_type == "default"
+    assert event.timestamp.endswith("+00:00")
+    assert "loginwindow" in event.summary
+
+
+def test_macos_log_planner_command() -> None:
+    plan = plan_command("collect macos logs DFIR-2026-0001 2m")
+    assert plan.steps[0].tool == "forensic.collect_macos_logs"
+    assert plan.steps[0].arguments == {"case_id": "DFIR-2026-0001", "last": "2m"}
