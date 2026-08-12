@@ -107,4 +107,22 @@ def plan_command(command: str) -> CommandPlan:
                 steps=[ToolCall(tool="forensic.verify_evidence", arguments={"case_id": parts[0], "evidence_id": parts[1]})],
             )
 
+    if lower.startswith("import events "):
+        payload = text[len("import events ") :].strip()
+        parts = payload.split(maxsplit=2)
+        if len(parts) >= 2:
+            case_id, path = parts[0], parts[1]
+            source_name = parts[2] if len(parts) == 3 else "jsonl"
+            return CommandPlan(
+                intent="import_forensic_events",
+                steps=[ToolCall(tool="forensic.import_events", arguments={"case_id": case_id, "path": path, "source_name": source_name})],
+            )
+
+    if lower.startswith("timeline "):
+        case_id = text[len("timeline ") :].strip()
+        return CommandPlan(
+            intent="show_forensic_timeline",
+            steps=[ToolCall(tool="forensic.show_timeline", arguments={"case_id": case_id})],
+        )
+
     return CommandPlan(intent="unknown", requires_action=False, steps=[])
