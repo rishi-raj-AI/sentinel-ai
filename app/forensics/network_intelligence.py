@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -11,25 +11,34 @@ from app.forensics.timeline import TimelineStore
 class NetworkIntelligenceEngine:
     """Aggregate normalized network events into investigator-friendly flows."""
 
+    DOCUMENTATION_NETWORKS = (
+        ipaddress.ip_network("192.0.2.0/24"),
+        ipaddress.ip_network("198.51.100.0/24"),
+        ipaddress.ip_network("203.0.113.0/24"),
+        ipaddress.ip_network("2001:db8::/32"),
+    )
+
     def __init__(self, case_dir: str | Path) -> None:
         self.store = TimelineStore(case_dir)
 
-    @staticmethod
-    def _ip_scope(value: str | None) -> str:
+    @classmethod
+    def _ip_scope(cls, value: str | None) -> str:
         if not value:
             return "unknown"
         try:
             ip = ipaddress.ip_address(value)
         except ValueError:
             return "invalid"
+        if any(ip in network for network in cls.DOCUMENTATION_NETWORKS):
+            return "documentation"
         if ip.is_loopback:
             return "loopback"
-        if ip.is_private:
-            return "private"
         if ip.is_multicast:
             return "multicast"
         if ip.is_link_local:
             return "link_local"
+        if ip.is_private:
+            return "private"
         if ip.is_reserved:
             return "reserved"
         return "public"
@@ -46,11 +55,16 @@ class NetworkIntelligenceEngine:
         tls_hosts: Counter[str] = Counter()
         destination_scopes: Counter[str] = Counter()
         source_scopes: Counter[str] = Counter()
+        ignored_events = 0
 
         for event in events:
             details = event.get("details") or {}
             src = str(details.get("src") or "")
             dst = str(details.get("dst") or "")
+            if not src and not dst:
+                ignored_events += 1
+                continue
+
             src_port = str(self._port(details, "src") or "")
             dst_port = str(self._port(details, "dst") or "")
             key = (src, src_port, dst, dst_port)
@@ -94,16 +108,16 @@ class NetworkIntelligenceEngine:
             rendered["dst_scope"] = self._ip_scope(flow["dst"])
             rendered_flows.append(rendered)
 
-        public_destinations = [
-            flow for flow in rendered_flows if flow.get("dst_scope") == "public"
-        ]
+        public_destinations = [flow for flow in rendered_flows if flow.get("dst_scope") == "public"]
         unusual_ports = [
-            flow for flow in rendered_flows
+            flow
+            for flow in rendered_flows
             if flow.get("dst_port") and str(flow["dst_port"]) not in {"53", "80", "123", "443"}
         ]
 
         return {
             "network_event_count": len(events),
+            "network_events_ignored": ignored_events,
             "flow_count": len(flows),
             "flows": rendered_flows,
             "dns_queries": dict(dns_queries.most_common(50)),
