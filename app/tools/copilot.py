@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.forensics.case_copilot import CaseCopilot, ModelProvider
+from app.forensics.case_copilot_v2 import CaseCopilot, ModelProvider
 from app.forensics.case_manager import CaseManager
 
 
