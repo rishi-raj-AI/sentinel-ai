@@ -25,6 +25,8 @@ TOOL_RISK: dict[str, RiskLevel] = {
     "forensic.attack_chain": RiskLevel.READ,
     "forensic.yara_status": RiskLevel.READ,
     "forensic.yara_scan_evidence": RiskLevel.MODIFICATION,
+    "forensic.evtx_status": RiskLevel.READ,
+    "forensic.evtx_analyze_evidence": RiskLevel.MODIFICATION,
     "forensic.collect_macos_logs": RiskLevel.MODIFICATION,
     "forensic.volatility_status": RiskLevel.READ,
     "forensic.run_volatility": RiskLevel.MODIFICATION,
