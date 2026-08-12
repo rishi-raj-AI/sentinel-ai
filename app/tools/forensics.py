@@ -48,6 +48,16 @@ def correlate_case(case_id: str, window_seconds: int = 300):
     return CorrelationEngine(case_dir).analyze(window_seconds=window_seconds)
 
 
+def _is_packet_level_network_finding(finding: dict) -> bool:
+    events = finding.get("events") or []
+    if not events:
+        return False
+    return all(
+        event.get("source") == "tshark" and event.get("event_type") == "network"
+        for event in events
+    )
+
+
 def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int = 25):
     case_dir = CaseManager().root / case_id
     CaseManager().load_case(case_id)
@@ -57,6 +67,15 @@ def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int 
         max_findings=max_findings,
     )
     network = NetworkIntelligenceEngine(case_dir).analyze(max_flows=max_findings)
+
+    # Packet-level tshark findings are represented more usefully by the aggregated
+    # flow-level network intelligence below. Keep non-tshark network findings,
+    # including manually imported/synthetic case events, for cross-source chains.
+    result["findings"] = [
+        finding
+        for finding in result.get("findings", [])
+        if not _is_packet_level_network_finding(finding)
+    ]
 
     aggregated_findings: list[dict] = []
     for flow in network["findings"]["public_destination_flows"]:
@@ -91,7 +110,22 @@ def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int 
         "destination_scopes": network["destination_scopes"],
     }
     result["network_findings"] = aggregated_findings[:max_findings]
+
+    severity_counts = {"high": 0, "medium": 0, "low": 0}
+    for finding in result["findings"]:
+        severity = str(finding.get("severity", "low"))
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+    result["summary"]["finding_count"] = len(result["findings"])
+    result["summary"]["severity_counts"] = severity_counts
     result["summary"]["network_finding_count"] = len(result["network_findings"])
+
+    if severity_counts.get("high", 0):
+        result["summary"]["overall_assessment"] = "high-priority activity requires review"
+    elif severity_counts.get("medium", 0) or result["network_findings"]:
+        result["summary"]["overall_assessment"] = "some activity warrants investigator review"
+    else:
+        result["summary"]["overall_assessment"] = "no high-priority findings"
+
     return result
 
 
