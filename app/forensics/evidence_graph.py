@@ -116,9 +116,32 @@ class EvidenceGraphEngine:
                 evidence_id=evidence_id,
             )
 
+            evidence_node: str | None = None
             if evidence_id:
                 evidence_node = add_node("evidence", str(evidence_id))
                 add_edge(evidence_node, event_node, "contains", timestamp=timestamp)
+
+            # YARA findings become explicit detection-rule entities linked back to
+            # both the event and the preserved evidence that produced the match.
+            if event_type == "yara_match" or source == "yara":
+                rule = details.get("rule")
+                if rule:
+                    yara_node = add_node(
+                        "yara_rule",
+                        str(rule),
+                        tags=details.get("tags") or [],
+                        metadata=details.get("metadata") or {},
+                        rule_path=details.get("rule_path"),
+                    )
+                    add_edge(event_node, yara_node, "matched_rule", timestamp=timestamp)
+                    if evidence_node:
+                        add_edge(evidence_node, yara_node, "matched", timestamp=timestamp)
+                evidence_path = details.get("evidence_path")
+                if evidence_path:
+                    file_node = add_node("file", str(evidence_path))
+                    add_edge(event_node, file_node, "scanned_file", timestamp=timestamp)
+                    if evidence_node:
+                        add_edge(evidence_node, file_node, "stored_as", timestamp=timestamp)
 
             # Adapter-independent process/PID extraction, including Volatility output.
             process_name = self._process_name(event)
@@ -136,7 +159,6 @@ class EvidenceGraphEngine:
                     if parent:
                         add_edge(parent, process_node, "spawned", timestamp=timestamp)
 
-            # macOS Unified Log specific extraction.
             if source == "macos_unified_log":
                 mac_proc = details.get("process")
                 if mac_proc:
@@ -173,7 +195,6 @@ class EvidenceGraphEngine:
                     ip_node = add_node("ip", ip_value)
                     add_edge(event_node, ip_node, "mentions_ip", timestamp=timestamp)
 
-            # Normalized network event extraction (PCAP/Volatility netscan/etc.).
             if event_type == "network":
                 src = details.get("src") or details.get("LocalAddr") or details.get("LocalAddress")
                 dst = details.get("dst") or details.get("ForeignAddr") or details.get("ForeignAddress")
@@ -206,7 +227,6 @@ class EvidenceGraphEngine:
                         if process_node:
                             add_edge(process_node, domain_node, relation, timestamp=timestamp)
 
-            # File/module extraction, including Volatility dlllist.
             path = details.get("path") or details.get("Path") or details.get("file") or details.get("FileName")
             if path:
                 node_type = "module" if event_type == "module" else "file"
