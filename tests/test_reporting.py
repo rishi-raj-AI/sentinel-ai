@@ -5,9 +5,10 @@ from app.forensics.case_manager import CaseManager
 from app.forensics.evidence import EvidenceManager
 from app.forensics.reporting import ForensicReportExporter
 from app.forensics.timeline import TimelineEvent, TimelineStore
+from app.tools import reporting as reporting_tools
 
 
-def test_report_export_generates_all_formats_with_hashes(tmp_path):
+def _build_case(tmp_path):
     cases_root = tmp_path / "cases"
     manager = CaseManager(str(cases_root))
     case = manager.create_case("Reporting integration test")
@@ -32,6 +33,11 @@ def test_report_export_generates_all_formats_with_hashes(tmp_path):
         },
         evidence_id="E0001",
     ))
+    return cases_root, manager, case_id, case_dir
+
+
+def test_report_export_generates_all_formats_with_hashes(tmp_path):
+    _, _, _, case_dir = _build_case(tmp_path)
 
     result = ForensicReportExporter(case_dir).export(
         output_format="all",
@@ -60,10 +66,34 @@ def test_report_export_generates_all_formats_with_hashes(tmp_path):
     assert len(result["manifest"]["sha256"]) == 64
 
 
-def test_report_export_planner_route():
+def test_report_bundle_verification_detects_tampering(tmp_path, monkeypatch):
+    cases_root, manager, case_id, case_dir = _build_case(tmp_path)
+    export = ForensicReportExporter(case_dir).export(
+        output_format="json",
+        report_name="verify-me",
+        max_items=20,
+    )
+
+    monkeypatch.setattr(reporting_tools, "CaseManager", lambda: manager)
+    clean = reporting_tools.verify_case_report(case_id, "verify-me")
+    assert clean["all_match"] is True
+
+    exported_json = Path(export["outputs"][0]["path"])
+    exported_json.write_text(exported_json.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
+    tampered = reporting_tools.verify_case_report(case_id, "verify-me")
+    assert tampered["all_match"] is False
+    assert tampered["outputs"][0]["match"] is False
+
+
+def test_report_export_planner_routes():
     plan = plan_command("export report DFIR-2026-0001 all 50 final-report")
     assert plan.steps[0].tool == "forensic.export_case_report"
     assert plan.steps[0].arguments["case_id"] == "DFIR-2026-0001"
     assert plan.steps[0].arguments["output_format"] == "all"
     assert plan.steps[0].arguments["max_items"] == 50
     assert plan.steps[0].arguments["report_name"] == "final-report"
+
+    verify = plan_command("verify report DFIR-2026-0001 final-report")
+    assert verify.steps[0].tool == "forensic.verify_case_report"
+    assert verify.steps[0].arguments["case_id"] == "DFIR-2026-0001"
+    assert verify.steps[0].arguments["report_name"] == "final-report"
