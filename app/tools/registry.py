@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 import psutil
 
+from app.tools.autonomous_investigation import autonomous_investigate, list_investigation_runs, show_investigation_run
 from app.tools.copilot import copilot_ask, copilot_status
 from app.tools.evtx import create_sample_evtx, evtx_analyze_evidence, evtx_status
 from app.tools.forensics import analyze_pcap_evidence, attack_chain, attack_mapping, collect_macos_logs, correlate_case, create_case, create_sample_pcap, evidence_graph, graph_neighbors, graph_trace, import_events, investigate_case, network_intelligence, register_evidence, run_volatility, run_volatility_evidence, show_case, show_timeline, tshark_status, verify_evidence, volatility_status, yara_scan_evidence, yara_status
@@ -94,6 +95,9 @@ TOOLS: dict[str, ToolFunction] = {
     "forensic.verify_case_report": verify_case_report,
     "forensic.copilot_status": copilot_status,
     "forensic.copilot_ask": copilot_ask,
+    "forensic.autonomous_investigate": autonomous_investigate,
+    "forensic.list_investigation_runs": list_investigation_runs,
+    "forensic.show_investigation_run": show_investigation_run,
     "forensic.collect_macos_logs": collect_macos_logs,
     "forensic.volatility_status": volatility_status,
     "forensic.run_volatility": run_volatility,
