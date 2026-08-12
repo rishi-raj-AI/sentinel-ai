@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.forensics.attack_mapping import AttackMappingEngine
 from app.forensics.case_manager import CaseManager
 from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
@@ -66,6 +67,12 @@ def graph_trace(case_id: str, source: str, target: str, max_hops: int = 6):
     case_dir = CaseManager().root / case_id
     CaseManager().load_case(case_id)
     return EvidenceGraphQueryEngine(case_dir).trace(source, target, max_hops=max_hops)
+
+
+def attack_mapping(case_id: str, max_candidates: int = 25):
+    case_dir = CaseManager().root / case_id
+    CaseManager().load_case(case_id)
+    return AttackMappingEngine(case_dir).analyze(max_candidates=max_candidates)
 
 
 def _is_packet_level_network_finding(finding: dict) -> bool:
