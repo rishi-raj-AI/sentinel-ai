@@ -6,9 +6,15 @@ from app.models import RiskLevel, ToolCall
 TOOL_RISK: dict[str, RiskLevel] = {
     "filesystem.list_directory": RiskLevel.READ,
     "filesystem.read_text_file": RiskLevel.READ,
+    "filesystem.write_text_file": RiskLevel.MODIFICATION,
+    "filesystem.create_directory": RiskLevel.MODIFICATION,
     "forensic.sha256_file": RiskLevel.READ,
     "system.disk_usage": RiskLevel.READ,
     "system.info": RiskLevel.READ,
+    "memory.remember": RiskLevel.MODIFICATION,
+    "memory.recall": RiskLevel.READ,
+    "memory.forget": RiskLevel.MODIFICATION,
+    "memory.list": RiskLevel.READ,
 }
 
 
