@@ -1,0 +1,3 @@
+Sentinel local forensic validation artifact.
+SENTINEL_YARA_TEST_MARKER
+This file is harmless and exists only to validate the YARA evidence pipeline.
