@@ -72,4 +72,14 @@ class CaseCopilot(BaseCaseCopilot):
         return True
 
 
-__all__ = ["CaseCopilot", "CopilotSource", "ModelProvider"]
+def install_base_patch() -> None:
+    """Apply the same citation behavior to code that imports the base class."""
+    BaseCaseCopilot._system_prompt = staticmethod(CaseCopilot._system_prompt)
+    BaseCaseCopilot._user_prompt = staticmethod(CaseCopilot._user_prompt)
+    BaseCaseCopilot._citations_are_grounded = classmethod(CaseCopilot._citations_are_grounded.__func__)
+    BaseCaseCopilot.SOURCE_TOKEN_RE = CaseCopilot.SOURCE_TOKEN_RE
+
+
+install_base_patch()
+
+__all__ = ["CaseCopilot", "CopilotSource", "ModelProvider", "install_base_patch"]
