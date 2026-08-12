@@ -6,6 +6,8 @@ from typing import Any, Callable
 
 import psutil
 
+from app.tools.memory import forget, list_memories, recall, remember
+
 ToolFunction = Callable[..., Any]
 
 
@@ -19,6 +21,21 @@ def read_text_file(path: str, max_bytes: int = 1_000_000) -> str:
     if target.stat().st_size > max_bytes:
         raise ValueError(f"File exceeds read limit of {max_bytes} bytes")
     return target.read_text(encoding="utf-8")
+
+
+def write_text_file(path: str, content: str, overwrite: bool = False) -> dict[str, Any]:
+    target = Path(path).expanduser().resolve()
+    if target.exists() and not overwrite:
+        raise FileExistsError(f"File already exists: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return {"path": str(target), "bytes_written": len(content.encode("utf-8"))}
+
+
+def create_directory(path: str) -> dict[str, Any]:
+    target = Path(path).expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    return {"path": str(target), "created": True}
 
 
 def sha256_file(path: str, chunk_size: int = 1024 * 1024) -> str:
@@ -51,9 +68,15 @@ def system_info() -> dict[str, Any]:
 TOOLS: dict[str, ToolFunction] = {
     "filesystem.list_directory": list_directory,
     "filesystem.read_text_file": read_text_file,
+    "filesystem.write_text_file": write_text_file,
+    "filesystem.create_directory": create_directory,
     "forensic.sha256_file": sha256_file,
     "system.disk_usage": disk_usage,
     "system.info": system_info,
+    "memory.remember": remember,
+    "memory.recall": recall,
+    "memory.forget": forget,
+    "memory.list": list_memories,
 }
 
 
