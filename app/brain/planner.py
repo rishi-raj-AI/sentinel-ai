@@ -81,21 +81,23 @@ def plan_command(command: str) -> CommandPlan:
         if len(parts) == 3:
             return CommandPlan(
                 intent="run_volatility_evidence",
-                steps=[ToolCall(
-                    tool="forensic.run_volatility_evidence",
-                    arguments={"case_id": parts[0], "evidence_id": parts[1], "plugin": parts[2]},
-                )],
+                steps=[ToolCall(tool="forensic.run_volatility_evidence", arguments={"case_id": parts[0], "evidence_id": parts[1], "plugin": parts[2]})],
             )
     if lower.startswith("volatility run "):
         parts = text[len("volatility run ") :].strip().split(maxsplit=3)
         if len(parts) >= 3:
-            arguments: dict[str, object] = {
-                "case_id": parts[0],
-                "plugin": parts[1],
-                "image_path": parts[2],
-            }
+            arguments: dict[str, object] = {"case_id": parts[0], "plugin": parts[1], "image_path": parts[2]}
             if len(parts) == 4:
                 arguments["evidence_id"] = parts[3]
             return CommandPlan(intent="run_volatility", steps=[ToolCall(tool="forensic.run_volatility", arguments=arguments)])
+    if lower in {"tshark status", "check tshark"}:
+        return CommandPlan(intent="tshark_status", steps=[ToolCall(tool="forensic.tshark_status")])
+    if lower.startswith("pcap evidence "):
+        parts = text[len("pcap evidence ") :].strip().split()
+        if len(parts) >= 2:
+            arguments: dict[str, object] = {"case_id": parts[0], "evidence_id": parts[1]}
+            if len(parts) >= 3 and parts[2].isdigit():
+                arguments["max_packets"] = int(parts[2])
+            return CommandPlan(intent="analyze_pcap_evidence", steps=[ToolCall(tool="forensic.analyze_pcap_evidence", arguments=arguments)])
 
     return CommandPlan(intent="unknown", requires_action=False, steps=[])
