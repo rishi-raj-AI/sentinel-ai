@@ -1,4 +1,4 @@
-from app.forensics.case_copilot_v2 import install_base_patch
+from app.forensics.case_copilot_v3 import install_base_patch
 
 install_base_patch()
 
