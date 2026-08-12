@@ -5,6 +5,9 @@ import pytest
 from app.audit.logger import AuditLogger
 from app.brain.planner import plan_command
 from app.executor import ConfirmationRequired, Executor
+from app.forensics.case_manager import CaseManager
+from app.forensics.chain_of_custody import ChainOfCustody
+from app.forensics.evidence import EvidenceManager
 from app.memory.store import MemoryStore
 
 
@@ -46,3 +49,30 @@ def test_memory_persists_between_instances(tmp_path: Path) -> None:
     first.set("owner_name", "Rishi")
     second = MemoryStore(db)
     assert second.get("owner_name") == "Rishi"
+
+
+def test_forensic_case_and_evidence_verification(tmp_path: Path) -> None:
+    cases_root = tmp_path / "cases"
+    case = CaseManager(str(cases_root)).create_case("Unit test investigation")
+    source = tmp_path / "artifact.txt"
+    source.write_text("forensic evidence", encoding="utf-8")
+
+    manager = EvidenceManager(str(cases_root))
+    evidence = manager.register(case["case_id"], str(source))
+    verification = manager.verify(case["case_id"], evidence["evidence_id"])
+
+    assert verification["all_match"] is True
+    assert verification["chain_of_custody_valid"] is True
+    assert len(evidence["sha256"]) == 64
+
+
+def test_chain_of_custody_detects_tampering(tmp_path: Path) -> None:
+    case = CaseManager(str(tmp_path / "cases")).create_case("Tamper test")
+    case_dir = tmp_path / "cases" / case["case_id"]
+    ledger = ChainOfCustody(case_dir)
+    ledger.append("test_event", {"value": 1})
+    assert ledger.verify() is True
+
+    content = ledger.path.read_text(encoding="utf-8").replace('"value": 1', '"value": 2')
+    ledger.path.write_text(content, encoding="utf-8")
+    assert ledger.verify() is False
