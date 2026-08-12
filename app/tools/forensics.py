@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.forensics.case_manager import CaseManager
+from app.forensics.correlation import CorrelationEngine
 from app.forensics.evidence import EvidenceManager
 from app.forensics.event_import import import_jsonl_events, timeline_summary
 
@@ -31,3 +32,9 @@ def show_timeline(case_id: str):
     case_dir = CaseManager().root / case_id
     CaseManager().load_case(case_id)
     return timeline_summary(case_dir)
+
+
+def correlate_case(case_id: str, window_seconds: int = 300):
+    case_dir = CaseManager().root / case_id
+    CaseManager().load_case(case_id)
+    return CorrelationEngine(case_dir).analyze(window_seconds=window_seconds)
