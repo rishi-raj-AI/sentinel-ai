@@ -61,6 +61,22 @@ def test_investigation_builds_high_confidence_chain(tmp_path):
     assert chains[0]["severity"] == "high"
 
 
+def test_apple_sandbox_contacts_errors_are_not_high_priority(tmp_path):
+    case_dir = tmp_path / "DFIR-BENIGN"
+    store = TimelineStore(case_dir)
+    store.append(TimelineEvent(
+        timestamp="2026-08-12T18:42:35+00:00",
+        source="macos_unified_log",
+        event_type="error",
+        summary="/kernel: Sandbox: com.apple.SpeechRecognitionCore deny(1) mach-lookup com.apple.contactsd.persistence",
+        details={"message": "Sandbox restriction", "sender_image_path": "ContactsPersistence.framework"},
+    ))
+    result = InvestigationEngine(case_dir).analyze()
+    assert InvestigationEngine.score_event(result_event := store.read()[0]) < 4
+    assert result["relevant_event_count"] == 0
+    assert result["summary"]["severity_counts"]["high"] == 0
+
+
 def test_investigation_planner_command():
     plan = plan_command("investigate DFIR-2026-0001 120 10")
     assert plan.steps[0].tool == "forensic.investigate_case"
