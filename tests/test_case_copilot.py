@@ -39,12 +39,17 @@ class FakeProvider:
         assert "Answer only from the supplied case sources" in system_prompt
         assert "4444" in user_prompt
         assert "SOURCE" in user_prompt
-        return "UDP/4444 is supported by the captured flow [FLOW:1] and registered evidence [EVIDENCE:E0001]."
+        return "UDP/4444 is supported by the captured network flow [FLOW:1]."
 
 
 class BrokenProvider(FakeProvider):
     def complete(self, system_prompt: str, user_prompt: str) -> str:
         raise RuntimeError("offline")
+
+
+class UngroundedProvider(FakeProvider):
+    def complete(self, system_prompt: str, user_prompt: str) -> str:
+        return "This is definitely malicious."
 
 
 def test_copilot_retrieves_network_evidence(tmp_path):
@@ -72,6 +77,13 @@ def test_copilot_model_failure_falls_back(tmp_path):
     assert "currently ingested case evidence" in result["answer"]
     assert "model_fallback" in result["provider_error"]
     assert result["source_count"] > 0
+
+
+def test_copilot_rejects_uncited_model_answer(tmp_path):
+    case_dir, _ = _case(tmp_path)
+    result = CaseCopilot(case_dir, provider=UngroundedProvider()).answer("Is this malicious?")
+    assert result["mode"] == "deterministic"
+    assert "no Sentinel source citations" in result["provider_error"]
 
 
 def test_planner_routes_copilot_commands():
