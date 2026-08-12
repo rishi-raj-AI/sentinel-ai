@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 from app.forensics.evidence_graph import EvidenceGraphEngine
 from app.forensics.investigation import InvestigationEngine
 from app.forensics.network_intelligence import NetworkIntelligenceEngine
+from app.forensics.sigma_engine import SigmaEngine
 from app.forensics.timeline import TimelineStore
 
 
@@ -21,12 +23,7 @@ class AttackCandidate:
 
 
 class AttackMappingEngine:
-    """Conservative, deterministic ATT&CK candidate mapper.
-
-    ATT&CK is a behavior framework, not a protocol-labeling system. This engine
-    only emits candidates when observed artifacts include stronger contextual
-    signals; ordinary DNS/HTTP/network traffic is not mapped by itself.
-    """
+    """Conservative, deterministic ATT&CK candidate mapper."""
 
     SCRIPT_MAPPINGS = (
         ("powershell", "T1059.001", "PowerShell", "Execution"),
@@ -39,6 +36,7 @@ class AttackMappingEngine:
         ("python ", "T1059.006", "Python", "Execution"),
         ("python3 ", "T1059.006", "Python", "Execution"),
     )
+    ATTACK_TAG_RE = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$", re.I)
 
     def __init__(self, case_dir: str | Path) -> None:
         self.case_dir = Path(case_dir)
@@ -61,62 +59,75 @@ class AttackMappingEngine:
                     continue
                 seen.add(key)
                 score = InvestigationEngine.score_event(event)
-                candidates.append(
-                    AttackCandidate(
-                        technique_id=technique_id,
-                        technique_name=technique_name,
-                        tactic=tactic,
-                        confidence="medium" if score >= 8 else "low",
-                        reason=f"Observed command/script interpreter indicator '{marker.strip()}' in forensic event",
-                        evidence=[event],
-                    )
-                )
+                candidates.append(AttackCandidate(
+                    technique_id=technique_id,
+                    technique_name=technique_name,
+                    tactic=tactic,
+                    confidence="medium" if score >= 8 else "low",
+                    reason=f"Observed command/script interpreter indicator '{marker.strip()}' in forensic event",
+                    evidence=[event],
+                ))
+        return candidates
+
+    def _sigma_candidates(self) -> list[AttackCandidate]:
+        candidates: list[AttackCandidate] = []
+        try:
+            sigma = SigmaEngine(self.case_dir).analyze("rules/sigma", max_detections=100)
+        except (FileNotFoundError, ValueError):
+            return candidates
+        names = {
+            "T1059.001": ("PowerShell", "Execution"),
+            "T1071.001": ("Application Layer Protocol: Web Protocols", "Command and Control"),
+            "T1071.004": ("Application Layer Protocol: DNS", "Command and Control"),
+        }
+        for detection in sigma.get("detections", []):
+            for tag in detection.get("tags", []):
+                match = self.ATTACK_TAG_RE.match(str(tag))
+                if not match:
+                    continue
+                technique_id = match.group(1).upper()
+                technique_name, tactic = names.get(technique_id, ("Sigma-tagged ATT&CK technique", "Unknown"))
+                candidates.append(AttackCandidate(
+                    technique_id=technique_id,
+                    technique_name=technique_name,
+                    tactic=tactic,
+                    confidence="high",
+                    reason=f"Sigma rule {detection.get('rule_id')} matched evidence and carries ATT&CK tag attack.{technique_id.lower()}",
+                    evidence=[{
+                        "rule_id": detection.get("rule_id"),
+                        "evidence_id": detection.get("evidence_id"),
+                        "event_timestamp": detection.get("event_timestamp"),
+                        "matched_selections": detection.get("matched_selections", []),
+                    }],
+                ))
         return candidates
 
     def _network_candidates(self) -> list[AttackCandidate]:
         network = NetworkIntelligenceEngine(self.case_dir).analyze(max_flows=100)
         candidates: list[AttackCandidate] = []
-
-        # Only suspicious-context DNS is considered a T1071.004 candidate. DNS
-        # presence by itself is intentionally insufficient.
         unusual = network.get("findings", {}).get("unusual_destination_ports", [])
         unusual_evidence = {eid for flow in unusual for eid in flow.get("evidence_ids", [])}
         dns_queries = network.get("dns_queries", {})
         if dns_queries and unusual_evidence:
-            candidates.append(
-                AttackCandidate(
-                    technique_id="T1071.004",
-                    technique_name="Application Layer Protocol: DNS",
-                    tactic="Command and Control",
-                    confidence="low",
-                    reason=(
-                        "DNS activity exists in evidence that also contains an unusual network flow; "
-                        "this is a review candidate, not proof of DNS-based command and control"
-                    ),
-                    evidence=[{"evidence_ids": sorted(unusual_evidence), "dns_queries": dns_queries}],
-                )
-            )
-
+            candidates.append(AttackCandidate(
+                technique_id="T1071.004",
+                technique_name="Application Layer Protocol: DNS",
+                tactic="Command and Control",
+                confidence="low",
+                reason="DNS activity exists in evidence that also contains an unusual network flow; this is a review candidate, not proof of DNS-based command and control",
+                evidence=[{"evidence_ids": sorted(unusual_evidence), "dns_queries": dns_queries}],
+            ))
         http_hosts = network.get("http_hosts", {})
         tls_sni = network.get("tls_sni", {})
         if (http_hosts or tls_sni) and unusual_evidence:
-            candidates.append(
-                AttackCandidate(
-                    technique_id="T1071.001",
-                    technique_name="Application Layer Protocol: Web Protocols",
-                    tactic="Command and Control",
-                    confidence="low",
-                    reason=(
-                        "HTTP/TLS application-layer activity co-occurs with an unusual network flow; "
-                        "manual validation is required before treating it as C2"
-                    ),
-                    evidence=[{
-                        "evidence_ids": sorted(unusual_evidence),
-                        "http_hosts": http_hosts,
-                        "tls_sni": tls_sni,
-                    }],
-                )
-            )
+            candidates.append(AttackCandidate(
+                technique_id="T1071.001",
+                technique_name="Application Layer Protocol: Web Protocols",
+                tactic="Command and Control",
+                confidence="low",
+                reason="HTTP/TLS application-layer activity co-occurs with an unusual network flow; manual validation is required before treating it as C2",
+                evidence=[{"evidence_ids": sorted(unusual_evidence), "http_hosts": http_hosts, "tls_sni": tls_sni}],
+            ))
         return candidates
 
     @staticmethod
@@ -133,15 +144,14 @@ class AttackMappingEngine:
     def analyze(self, *, max_candidates: int = 25) -> dict[str, Any]:
         events = self.store.read()
         candidates = self._script_candidates(events)
+        candidates.extend(self._sigma_candidates())
         candidates.extend(self._network_candidates())
         candidates = self._deduplicate(candidates)[:max_candidates]
-
         by_tactic: dict[str, int] = {}
         by_technique: dict[str, int] = {}
         for candidate in candidates:
             by_tactic[candidate.tactic] = by_tactic.get(candidate.tactic, 0) + 1
             by_technique[candidate.technique_id] = by_technique.get(candidate.technique_id, 0) + 1
-
         graph = EvidenceGraphEngine(self.case_dir).build(max_nodes=1500, max_edges=3000)
         return {
             "candidate_count": len(candidates),
