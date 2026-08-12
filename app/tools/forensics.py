@@ -16,6 +16,7 @@ from app.forensics.network_intelligence import NetworkIntelligenceEngine
 from app.forensics.pcap import TsharkAdapter
 from app.forensics.sample_pcap import create_sample_pcap as generate_sample_pcap
 from app.forensics.volatility import VolatilityAdapter
+from app.forensics.yara_adapter import YaraAdapter
 
 
 def create_case(title: str, description: str = ""):
@@ -80,6 +81,32 @@ def attack_chain(case_id: str, max_candidates: int = 25):
     case_dir = CaseManager().root / case_id
     CaseManager().load_case(case_id)
     return AttackChainEngine(case_dir).build(max_candidates=max_candidates)
+
+
+def yara_status():
+    return YaraAdapter.status()
+
+
+def _resolve_case_evidence(case_id: str, evidence_id: str) -> dict:
+    record = CaseManager().load_case(case_id)
+    for item in record.get("evidence", []):
+        if item.get("evidence_id") == evidence_id:
+            return item
+    raise ValueError(f"Evidence not found in {case_id}: {evidence_id}")
+
+
+def yara_scan_evidence(case_id: str, evidence_id: str, rule_path: str):
+    verification = EvidenceManager().verify(case_id=case_id, evidence_id=evidence_id)
+    if not verification.get("all_match") or not verification.get("chain_of_custody_valid"):
+        raise RuntimeError(f"Evidence integrity verification failed for {case_id}/{evidence_id}")
+    item = _resolve_case_evidence(case_id, evidence_id)
+    stored_path = Path(item["stored_path"]).resolve()
+    if not stored_path.is_file():
+        raise FileNotFoundError(f"Stored evidence file not found: {stored_path}")
+    case_dir = CaseManager().root / case_id
+    result = YaraAdapter(case_dir).scan(str(stored_path), rule_path, evidence_id=evidence_id)
+    result.update({"case_id": case_id, "evidence_id": evidence_id, "evidence_sha256_verified": True, "chain_of_custody_valid": True})
+    return result
 
 
 def _is_packet_level_network_finding(finding: dict) -> bool:
@@ -152,14 +179,6 @@ def tshark_status():
 
 def create_sample_pcap(path: str = "workspace/sample.pcap"):
     return generate_sample_pcap(path)
-
-
-def _resolve_case_evidence(case_id: str, evidence_id: str) -> dict:
-    record = CaseManager().load_case(case_id)
-    for item in record.get("evidence", []):
-        if item.get("evidence_id") == evidence_id:
-            return item
-    raise ValueError(f"Evidence not found in {case_id}: {evidence_id}")
 
 
 def run_volatility(case_id: str, image_path: str, plugin: str, evidence_id: str | None = None):
