@@ -74,5 +74,18 @@ def plan_command(command: str) -> CommandPlan:
             if len(parts) >= 2:
                 arguments["last"] = parts[1]
             return CommandPlan(intent="collect_macos_logs", steps=[ToolCall(tool="forensic.collect_macos_logs", arguments=arguments)])
+    if lower in {"volatility status", "check volatility"}:
+        return CommandPlan(intent="volatility_status", steps=[ToolCall(tool="forensic.volatility_status")])
+    if lower.startswith("volatility run "):
+        parts = text[len("volatility run ") :].strip().split(maxsplit=3)
+        if len(parts) >= 3:
+            arguments: dict[str, object] = {
+                "case_id": parts[0],
+                "plugin": parts[1],
+                "image_path": parts[2],
+            }
+            if len(parts) == 4:
+                arguments["evidence_id"] = parts[3]
+            return CommandPlan(intent="run_volatility", steps=[ToolCall(tool="forensic.run_volatility", arguments=arguments)])
 
     return CommandPlan(intent="unknown", requires_action=False, steps=[])
