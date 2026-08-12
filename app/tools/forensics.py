@@ -8,6 +8,7 @@ from app.forensics.evidence import EvidenceManager
 from app.forensics.event_import import import_jsonl_events, timeline_summary
 from app.forensics.investigation import InvestigationEngine
 from app.forensics.macos_logs import MacOSLogAdapter
+from app.forensics.network_intelligence import NetworkIntelligenceEngine
 from app.forensics.pcap import TsharkAdapter
 from app.forensics.sample_pcap import create_sample_pcap as generate_sample_pcap
 from app.forensics.volatility import VolatilityAdapter
@@ -54,6 +55,12 @@ def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int 
         window_seconds=window_seconds,
         max_findings=max_findings,
     )
+
+
+def network_intelligence(case_id: str, max_flows: int = 100):
+    case_dir = CaseManager().root / case_id
+    CaseManager().load_case(case_id)
+    return NetworkIntelligenceEngine(case_dir).analyze(max_flows=max_flows)
 
 
 def collect_macos_logs(
