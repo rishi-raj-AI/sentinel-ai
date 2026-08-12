@@ -35,4 +35,17 @@ def plan_command(command: str) -> CommandPlan:
                 arguments["max_items"] = int(parts[1])
             return CommandPlan(intent="threat_intel_inventory", steps=[ToolCall(tool="forensic.threat_intel_inventory", arguments=arguments)])
 
+    if lower.startswith("export report ") or lower.startswith("report export "):
+        prefix = "export report " if lower.startswith("export report ") else "report export "
+        parts = text[len(prefix):].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2:
+                arguments["output_format"] = parts[1]
+            if len(parts) >= 3 and parts[2].isdigit():
+                arguments["max_items"] = int(parts[2])
+            if len(parts) >= 4:
+                arguments["report_name"] = parts[3]
+            return CommandPlan(intent="export_case_report", steps=[ToolCall(tool="forensic.export_case_report", arguments=arguments)])
+
     return base_plan_command(command)
