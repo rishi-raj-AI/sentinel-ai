@@ -30,16 +30,44 @@ class CopilotSource:
 class ModelProvider:
     """Optional OpenAI-compatible chat-completions provider.
 
-    The endpoint is supplied as a complete URL via SENTINEL_MODEL_ENDPOINT, so
-    Sentinel does not assume a specific vendor. If configuration is absent or a
-    model request fails, the copilot falls back to deterministic grounded output.
+    Configuration can come from environment variables or from the local
+    `config/model.json` file written by Sentinel's setup script. Placeholder
+    environment values such as YOUR_PORT are ignored so they cannot override a
+    valid persisted local configuration.
     """
 
+    DEFAULT_CONFIG = Path("config/model.json")
+
     def __init__(self) -> None:
-        self.endpoint = os.getenv("SENTINEL_MODEL_ENDPOINT", "").strip()
-        self.model = os.getenv("SENTINEL_MODEL_NAME", "").strip()
-        self.api_key = os.getenv("SENTINEL_MODEL_API_KEY", "").strip()
-        self.timeout = float(os.getenv("SENTINEL_MODEL_TIMEOUT", "30"))
+        config = self._load_config()
+        env_endpoint = os.getenv("SENTINEL_MODEL_ENDPOINT", "").strip()
+        env_model = os.getenv("SENTINEL_MODEL_NAME", "").strip()
+        env_key = os.getenv("SENTINEL_MODEL_API_KEY", "").strip()
+
+        self.endpoint = env_endpoint if self._usable(env_endpoint) else str(config.get("endpoint") or "").strip()
+        self.model = env_model if self._usable(env_model) else str(config.get("model") or "").strip()
+        self.api_key = env_key if self._usable(env_key) else str(config.get("api_key") or "").strip()
+        timeout_raw = os.getenv("SENTINEL_MODEL_TIMEOUT", str(config.get("timeout") or "30"))
+        self.timeout = float(timeout_raw)
+        self.config_source = "environment" if self._usable(env_endpoint) and self._usable(env_model) else ("config_file" if self.endpoint and self.model else "none")
+
+    @classmethod
+    def _load_config(cls) -> dict[str, Any]:
+        path = Path(os.getenv("SENTINEL_MODEL_CONFIG", str(cls.DEFAULT_CONFIG))).expanduser()
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _usable(value: str) -> bool:
+        if not value:
+            return False
+        upper = value.upper()
+        return not any(marker in upper for marker in ("YOUR_PORT", "YOUR_MODEL", "YOUR_API", "PLACEHOLDER"))
 
     @property
     def configured(self) -> bool:
@@ -125,8 +153,9 @@ class CaseCopilot:
 
         sigma = SigmaEngine(self.case_dir).analyze(self.sigma_rules, max_detections=100)
         for idx, row in enumerate(sigma.get("detections", []), start=1):
+            sid = f"SIGMA:{row.get('rule_id')}:{idx}"
             sources.append(CopilotSource(
-                source_id=f"SIGMA:{row.get('rule_id')}:{idx}",
+                source_id=sid,
                 kind="sigma",
                 title=str(row.get("title") or row.get("rule_id") or "Sigma detection"),
                 text=f"Sigma detection level={row.get('level')} evidence={row.get('evidence_id')} matched={row.get('matched_selections')} tags={row.get('tags')}",
@@ -278,14 +307,10 @@ class CaseCopilot:
         return f"QUESTION:\n{question}\n\nCASE SOURCES:\n{rendered}"
 
     @staticmethod
-    def _validate_model_answer(answer: str, sources: list[CopilotSource]) -> None:
+    def _citations_are_grounded(answer: str, sources: list[CopilotSource]) -> bool:
+        cited = set(re.findall(r"\[([^\[\]]+:[^\[\]]+)\]", answer))
         allowed = {source.source_id for source in sources}
-        cited = set(re.findall(r"\[([^\[\]\n]+)\]", answer))
-        if not cited:
-            raise RuntimeError("Model answer contained no Sentinel source citations")
-        unknown = cited - allowed
-        if unknown:
-            raise RuntimeError(f"Model answer cited unavailable sources: {sorted(unknown)}")
+        return bool(cited) and cited.issubset(allowed)
 
     def answer(self, question: str, *, max_sources: int = 12) -> dict[str, Any]:
         text = question.strip()
@@ -298,7 +323,8 @@ class CaseCopilot:
         if self.provider.configured:
             try:
                 answer = self.provider.complete(self._system_prompt(), self._user_prompt(text, sources))
-                self._validate_model_answer(answer, sources)
+                if not self._citations_are_grounded(answer, sources):
+                    raise RuntimeError("Model answer did not contain only valid retrieved Sentinel citations")
                 mode = "model"
                 model_name = self.provider.model
             except Exception as exc:
