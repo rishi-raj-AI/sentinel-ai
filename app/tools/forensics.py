@@ -15,6 +15,7 @@ from app.forensics.macos_logs import MacOSLogAdapter
 from app.forensics.network_intelligence import NetworkIntelligenceEngine
 from app.forensics.pcap import TsharkAdapter
 from app.forensics.sample_pcap import create_sample_pcap as generate_sample_pcap
+from app.forensics.sigma_engine import SigmaEngine
 from app.forensics.volatility import VolatilityAdapter
 from app.forensics.yara_adapter import YaraAdapter
 
@@ -116,6 +117,10 @@ def _is_packet_level_network_finding(finding: dict) -> bool:
     return all(event.get("source") == "tshark" and event.get("event_type") == "network" for event in events)
 
 
+def _default_sigma_rules() -> Path:
+    return Path(__file__).resolve().parents[2] / "rules" / "sigma"
+
+
 def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int = 25):
     case_dir = CaseManager().root / case_id
     CaseManager().load_case(case_id)
@@ -141,6 +146,28 @@ def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int 
     }
     result["network_findings"] = aggregated_findings[:max_findings]
 
+    sigma_findings: list[dict] = []
+    rules_path = _default_sigma_rules()
+    if rules_path.is_dir():
+        sigma = SigmaEngine(case_dir).analyze(str(rules_path), max_detections=max_findings)
+        for detection in sigma.get("detections", []):
+            sigma_findings.append({
+                "title": detection.get("title"),
+                "severity": str(detection.get("level") or "medium").lower(),
+                "confidence": "high",
+                "reason": f"Sigma rule {detection.get('rule_id')} matched a normalized {detection.get('event_type')} event",
+                "rule_id": detection.get("rule_id"),
+                "evidence_id": detection.get("evidence_id"),
+                "event_timestamp": detection.get("event_timestamp"),
+                "event_source": detection.get("event_source"),
+                "matched_selections": detection.get("matched_selections") or [],
+                "tags": detection.get("tags") or [],
+            })
+        result["sigma_summary"] = sigma.get("summary", {})
+    else:
+        result["sigma_summary"] = {"by_level": {}, "by_rule": {}, "truncated": False, "engine": "sentinel-sigma-subset-v1"}
+    result["sigma_findings"] = sigma_findings[:max_findings]
+
     severity_counts = {"high": 0, "medium": 0, "low": 0}
     for finding in result["findings"]:
         severity = str(finding.get("severity", "low"))
@@ -148,9 +175,12 @@ def investigate_case(case_id: str, window_seconds: int = 120, max_findings: int 
     result["summary"]["finding_count"] = len(result["findings"])
     result["summary"]["severity_counts"] = severity_counts
     result["summary"]["network_finding_count"] = len(result["network_findings"])
-    if severity_counts.get("high", 0):
+    result["summary"]["sigma_finding_count"] = len(result["sigma_findings"])
+
+    sigma_high = any(str(item.get("severity")) == "high" for item in result["sigma_findings"])
+    if severity_counts.get("high", 0) or sigma_high:
         result["summary"]["overall_assessment"] = "high-priority activity requires review"
-    elif severity_counts.get("medium", 0) or result["network_findings"]:
+    elif severity_counts.get("medium", 0) or result["network_findings"] or result["sigma_findings"]:
         result["summary"]["overall_assessment"] = "some activity warrants investigator review"
     else:
         result["summary"]["overall_assessment"] = "no high-priority findings"
