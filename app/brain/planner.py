@@ -49,6 +49,16 @@ def plan_command(command: str) -> CommandPlan:
             return CommandPlan(intent="import_forensic_events", steps=[ToolCall(tool="forensic.import_events", arguments={"case_id": parts[0], "path": parts[1], "source_name": parts[2] if len(parts) == 3 else "jsonl"})])
     if lower.startswith("timeline "):
         return CommandPlan(intent="show_forensic_timeline", steps=[ToolCall(tool="forensic.show_timeline", arguments={"case_id": text[len("timeline ") :].strip()})])
+    if lower.startswith("investigate ") or lower.startswith("investigation "):
+        prefix = "investigate " if lower.startswith("investigate ") else "investigation "
+        parts = text[len(prefix) :].strip().split()
+        if parts:
+            arguments: dict[str, object] = {"case_id": parts[0]}
+            if len(parts) >= 2 and parts[1].isdigit():
+                arguments["window_seconds"] = int(parts[1])
+            if len(parts) >= 3 and parts[2].isdigit():
+                arguments["max_findings"] = int(parts[2])
+            return CommandPlan(intent="investigate_forensic_case", steps=[ToolCall(tool="forensic.investigate_case", arguments=arguments)])
     if lower.startswith("correlate ") or lower.startswith("analyze case "):
         prefix = "correlate " if lower.startswith("correlate ") else "analyze case "
         parts = text[len(prefix) :].strip().split()
