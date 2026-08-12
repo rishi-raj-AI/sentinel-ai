@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import psutil
 
-from app.tools.forensics import collect_macos_logs, correlate_case, create_case, import_events, register_evidence, show_case, show_timeline, verify_evidence
+from app.tools.forensics import collect_macos_logs, correlate_case, create_case, import_events, investigate_case, register_evidence, show_case, show_timeline, verify_evidence
 from app.tools.memory import forget, list_memories, recall, remember
 
 ToolFunction = Callable[..., Any]
@@ -79,6 +79,7 @@ TOOLS: dict[str, ToolFunction] = {
     "forensic.import_events": import_events,
     "forensic.show_timeline": show_timeline,
     "forensic.correlate_case": correlate_case,
+    "forensic.investigate_case": investigate_case,
     "forensic.collect_macos_logs": collect_macos_logs,
     "system.disk_usage": disk_usage,
     "system.info": system_info,
