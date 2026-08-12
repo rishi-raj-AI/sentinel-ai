@@ -9,6 +9,7 @@ from app.forensics.event_import import import_jsonl_events, timeline_summary
 from app.forensics.investigation import InvestigationEngine
 from app.forensics.macos_logs import MacOSLogAdapter
 from app.forensics.pcap import TsharkAdapter
+from app.forensics.sample_pcap import create_sample_pcap as generate_sample_pcap
 from app.forensics.volatility import VolatilityAdapter
 
 
@@ -76,6 +77,10 @@ def volatility_status():
 
 def tshark_status():
     return TsharkAdapter.status()
+
+
+def create_sample_pcap(path: str = "workspace/sample.pcap"):
+    return generate_sample_pcap(path)
 
 
 def _resolve_case_evidence(case_id: str, evidence_id: str) -> dict:
