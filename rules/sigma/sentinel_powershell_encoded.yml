@@ -1,0 +1,24 @@
+title: Sentinel PowerShell Encoded Command
+id: sentinel-powershell-encoded-command
+status: test
+description: Detects PowerShell process creation containing common encoded-command switches.
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  image:
+    Image|endswith:
+      - '\\powershell.exe'
+      - '\\pwsh.exe'
+  encoded:
+    CommandLine|contains:
+      - ' -enc '
+      - ' -encodedcommand '
+      - ' /enc '
+  condition: image and encoded
+level: high
+falsepositives:
+  - Administrative automation using encoded PowerShell commands
+tags:
+  - attack.execution
+  - attack.t1059.001
