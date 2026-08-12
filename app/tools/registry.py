@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import psutil
 
-from app.tools.forensics import collect_macos_logs, correlate_case, create_case, import_events, investigate_case, register_evidence, show_case, show_timeline, verify_evidence
+from app.tools.forensics import collect_macos_logs, correlate_case, create_case, import_events, investigate_case, register_evidence, run_volatility, show_case, show_timeline, verify_evidence, volatility_status
 from app.tools.memory import forget, list_memories, recall, remember
 
 ToolFunction = Callable[..., Any]
@@ -50,20 +50,11 @@ def sha256_file(path: str, chunk_size: int = 1024 * 1024) -> str:
 
 def disk_usage(path: str = "/") -> dict[str, int | float]:
     usage = psutil.disk_usage(str(Path(path).expanduser()))
-    return {
-        "total": usage.total,
-        "used": usage.used,
-        "free": usage.free,
-        "percent": usage.percent,
-    }
+    return {"total": usage.total, "used": usage.used, "free": usage.free, "percent": usage.percent}
 
 
 def system_info() -> dict[str, Any]:
-    return {
-        "cpu_percent": psutil.cpu_percent(interval=0.1),
-        "memory": psutil.virtual_memory()._asdict(),
-        "boot_time": psutil.boot_time(),
-    }
+    return {"cpu_percent": psutil.cpu_percent(interval=0.1), "memory": psutil.virtual_memory()._asdict(), "boot_time": psutil.boot_time()}
 
 
 TOOLS: dict[str, ToolFunction] = {
@@ -81,6 +72,8 @@ TOOLS: dict[str, ToolFunction] = {
     "forensic.correlate_case": correlate_case,
     "forensic.investigate_case": investigate_case,
     "forensic.collect_macos_logs": collect_macos_logs,
+    "forensic.volatility_status": volatility_status,
+    "forensic.run_volatility": run_volatility,
     "system.disk_usage": disk_usage,
     "system.info": system_info,
     "memory.remember": remember,
