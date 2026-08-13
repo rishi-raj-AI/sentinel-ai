@@ -21,6 +21,7 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
     least one cited flow rather than every flow having to contain every fact.
     """
 
+    LOW_PACKET_THRESHOLD = 5
     NORMALITY_TERMS = (
         "normal system activity", "normal activity", "normal system operations",
         "normal operations", "routine system activity", "routine system operations",
@@ -37,6 +38,10 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         r"^\s*\[(?:\s*(?:EVIDENCE|SIGMA|YARA|FLOW|TIMELINE|ATTACK|BRIEF):[^\[\],]+\s*,?\s*)+\]\s*$",
         re.IGNORECASE,
     )
+    SENTINEL_CITATION_RE = re.compile(
+        r"\[(?:\s*(?:EVIDENCE|SIGMA|YARA|FLOW|TIMELINE|ATTACK|BRIEF):[^\[\],]+\s*,?\s*)+\]",
+        re.IGNORECASE,
+    )
 
     def __init__(self, sources: Iterable[CopilotSource | dict[str, Any]]) -> None:
         super().__init__(sources)
@@ -49,6 +54,15 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
     def _contains_any(cls, text: str, terms: tuple[str, ...]) -> bool:
         lower = text.casefold()
         return any(term in lower for term in terms)
+
+    @classmethod
+    def _claim_without_citations(cls, claim: str) -> str:
+        """Remove Sentinel citation blocks before extracting network facts.
+
+        This prevents tokens such as FLOW:1 and FLOW:2 from being interpreted as
+        network ports 1 and 2 by the generic host:port parser.
+        """
+        return cls.SENTINEL_CITATION_RE.sub(" ", claim)
 
     @classmethod
     def _attach_adjacent_citations(cls, answer: str) -> tuple[str, int]:
@@ -86,7 +100,6 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         return (not reasons, reasons)
 
     def _flow_semantic_entailment(self, claim: str, source: CopilotSource) -> tuple[bool, list[str]]:
-        """Per-flow semantic checks that do not require all group facts per flow."""
         lower = claim.casefold()
         blob = self._metadata_blob(source)
         reasons: list[str] = []
@@ -94,12 +107,57 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
             reasons.append("Network-flow telemetry can establish endpoints/protocol/ports, but does not by itself establish malware or compromise.")
         return (not reasons, reasons)
 
+    @staticmethod
+    def _flow_packet_count(source: CopilotSource) -> int | None:
+        metadata = source.metadata or {}
+        for key in ("packets", "packet_count", "packets_count"):
+            value = metadata.get(key)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    pass
+        match = re.search(r"\bpackets?\s*[=:]\s*(\d+)\b", f"{source.title} {source.text}", re.I)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _flow_evidence_ids(source: CopilotSource) -> set[str]:
+        values: set[str] = set()
+        if source.evidence_id:
+            values.add(str(source.evidence_id).upper())
+        metadata = source.metadata or {}
+        for key in ("evidence", "evidence_id", "evidence_ids"):
+            value = metadata.get(key)
+            if isinstance(value, str):
+                values.update(re.findall(r"\bE\d{4,}\b", value, re.I))
+            elif isinstance(value, (list, tuple, set)):
+                for item in value:
+                    values.update(re.findall(r"\bE\d{4,}\b", str(item), re.I))
+        values.update(re.findall(r"\bE\d{4,}\b", f"{source.title} {source.text}", re.I))
+        return {value.upper() for value in values}
+
+    @classmethod
+    def _asserted_packet_counts(cls, claim_without_citations: str) -> list[int]:
+        values: list[int] = []
+        patterns = (
+            r"\bpackets?\s*[=:]\s*(\d+)\b",
+            r"\b(\d+)\s+packets?\b",
+            r"\bpacket\s+count\s+(?:of\s+|is\s+|was\s+)?(\d+)\b",
+        )
+        for pattern in patterns:
+            values.extend(int(value) for value in re.findall(pattern, claim_without_citations, re.I))
+        return list(dict.fromkeys(values))
+
     def _aggregate_flow_entailment(self, claim: str, sources: list[CopilotSource]) -> tuple[bool, list[str], dict[str, Any]]:
         """Validate concrete flow facts against the union of all cited flows."""
+        claim_facts = self._claim_without_citations(claim)
         union_blob = " ".join(self._metadata_blob(source) for source in sources)
         reasons: list[str] = []
-        asserted_ips = list(dict.fromkeys(re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", claim)))
-        asserted_ports = list(dict.fromkeys(re.findall(r":(\d{1,5})\b", claim)))
+
+        asserted_ips = list(dict.fromkeys(re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", claim_facts)))
+        asserted_ports = list(dict.fromkeys(re.findall(r":(\d{1,5})\b", claim_facts)))
+        asserted_packet_counts = self._asserted_packet_counts(claim_facts)
+        asserted_evidence_ids = list(dict.fromkeys(value.upper() for value in re.findall(r"\bE\d{4,}\b", claim_facts, re.I)))
 
         missing_ips = [ip for ip in asserted_ips if ip.casefold() not in union_blob]
         missing_ports = [port for port in asserted_ports if port not in union_blob]
@@ -108,12 +166,55 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         for port in missing_ports:
             reasons.append(f"Claimed port {port} is not present in any cited flow source.")
 
+        source_packet_counts = {
+            source.source_id: self._flow_packet_count(source)
+            for source in sources
+        }
+        available_packet_counts = {count for count in source_packet_counts.values() if count is not None}
+        missing_packet_counts = [count for count in asserted_packet_counts if count not in available_packet_counts]
+        for count in missing_packet_counts:
+            reasons.append(f"Claimed packet count {count} is not present in any cited flow source.")
+
+        source_evidence_ids = {
+            source.source_id: sorted(self._flow_evidence_ids(source))
+            for source in sources
+        }
+        evidence_union = {item for values in source_evidence_ids.values() for item in values}
+        missing_evidence_ids = [value for value in asserted_evidence_ids if value not in evidence_union]
+        for evidence_id in missing_evidence_ids:
+            reasons.append(f"Claimed evidence association {evidence_id} is not present in any cited flow source.")
+
+        low_packet_claimed = bool(re.search(r"\b(?:low|small|minimal)\s+packet\s+count\b", claim_facts, re.I))
+        low_packet_supported: bool | None = None
+        if low_packet_claimed:
+            counts = [count for count in source_packet_counts.values() if count is not None]
+            if len(counts) != len(sources):
+                low_packet_supported = False
+                reasons.append("Low packet-count characterization cannot be verified because one or more cited flows lack packet-count telemetry.")
+            else:
+                low_packet_supported = all(count <= self.LOW_PACKET_THRESHOLD for count in counts)
+                if not low_packet_supported:
+                    reasons.append(
+                        f"Low packet-count characterization is inconsistent with cited flow telemetry; "
+                        f"Sentinel threshold is <= {self.LOW_PACKET_THRESHOLD} packets per cited flow."
+                    )
+
         detail = {
             "source_ids": [source.source_id for source in sources],
             "asserted_ips": asserted_ips,
             "asserted_ports": asserted_ports,
             "missing_ips": missing_ips,
             "missing_ports": missing_ports,
+            "asserted_packet_counts": asserted_packet_counts,
+            "source_packet_counts": source_packet_counts,
+            "missing_packet_counts": missing_packet_counts,
+            "asserted_evidence_ids": asserted_evidence_ids,
+            "source_evidence_ids": source_evidence_ids,
+            "missing_evidence_ids": missing_evidence_ids,
+            "low_packet_claimed": low_packet_claimed,
+            "low_packet_supported": low_packet_supported,
+            "low_packet_threshold": self.LOW_PACKET_THRESHOLD,
+            "citations_removed_before_fact_extraction": True,
             "fact_union": True,
         }
         return (not reasons, reasons, detail)
@@ -188,9 +289,6 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         checks: list[dict[str, Any]] = []
         flow_sources = [source for source in cited if source.kind.casefold() == "network"]
 
-        # Validate concrete network facts once against the union of all cited
-        # flow sources. This prevents a valid two-flow sentence from requiring
-        # FLOW:1 to contain FLOW:2's endpoints (and vice versa).
         if flow_sources:
             aggregate_ok, aggregate_reasons, detail = self._aggregate_flow_entailment(claim, flow_sources)
             checks.append({
@@ -274,6 +372,9 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
             "adjacent_citation_lines_bound": True,
             "multi_source_fact_union": True,
             "benign_interpretation_requires_explicit_support": True,
+            "citations_removed_before_network_fact_extraction": True,
+            "packet_count_facts_verified": True,
+            "flow_evidence_associations_verified": True,
         })
         return result
 
