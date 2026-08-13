@@ -1,5 +1,5 @@
 from app.forensics.case_copilot import CopilotSource
-from app.forensics.source_entailment import SourceAwareClaimVerifier
+from app.forensics.source_entailment_v2 import SourceAwareClaimVerifier
 
 
 def _verifier():
@@ -141,6 +141,7 @@ def test_flow_packet_count_and_evidence_association_are_verified():
     assert detail["low_packet_supported"] is True
     assert detail["asserted_evidence_ids"] == ["E0003"]
     assert detail["missing_evidence_ids"] == []
+    assert result["policy"]["structured_fact_entailment_precedes_lexical_similarity"] is True
 
 
 def test_wrong_packet_count_or_evidence_association_is_rejected():
@@ -195,6 +196,7 @@ def test_answer_audit_includes_source_type_checks():
     assert result["policy"]["citations_removed_before_network_fact_extraction"] is True
     assert result["policy"]["packet_count_facts_verified"] is True
     assert result["policy"]["flow_evidence_associations_verified"] is True
+    assert result["policy"]["structured_fact_entailment_precedes_lexical_similarity"] is True
     assert result["unsupported_claim_count"] == 1
     assert result["source_type_entailment"]
 
