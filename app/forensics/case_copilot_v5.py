@@ -52,8 +52,10 @@ class CaseCopilot(RepairCaseCopilot):
         normalized = answer
 
         for alias_folded, canonical in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
+            # A sentence-ending period must not be treated as part of the alias.
+            # Dots remain legal inside the metadata-derived filename itself.
             pattern = re.compile(
-                rf"(?<![A-Za-z0-9_.:-]){re.escape(alias_folded)}(?![A-Za-z0-9_.:-])",
+                rf"(?<![A-Za-z0-9_:-]){re.escape(alias_folded)}(?![A-Za-z0-9_:-])",
                 re.IGNORECASE,
             )
 
