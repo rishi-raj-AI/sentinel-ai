@@ -14,11 +14,20 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
     semantics are checked first so a timeline row cannot prove normality, a
     network flow cannot prove malware, and a Sigma/YARA hit cannot be promoted
     into a compromise verdict without explicit supporting metadata.
+
+    Multi-source claims are evaluated using source unions where appropriate. For
+    example, a sentence describing two cited flows may distribute endpoint/port
+    facts across FLOW:1 and FLOW:2; each concrete fact must be present in at
+    least one cited flow rather than every flow having to contain every fact.
     """
 
     NORMALITY_TERMS = (
-        "normal system activity", "normal activity", "benign activity", "legitimate activity",
-        "expected activity", "harmless", "safe activity",
+        "normal system activity", "normal activity", "normal system operations",
+        "normal operations", "routine system activity", "routine system operations",
+        "routine activity", "benign activity", "benign system activity",
+        "legitimate activity", "legitimate system activity", "expected activity",
+        "expected system activity", "expected system behavior", "expected behaviour",
+        "harmless", "safe activity", "ordinary system activity", "typical system activity",
     )
     MALICIOUSNESS_TERMS = (
         "malware", "malicious", "compromise", "infected", "command-and-control", "c2",
@@ -43,14 +52,7 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
 
     @classmethod
     def _attach_adjacent_citations(cls, answer: str) -> tuple[str, int]:
-        """Attach citation-only lines to the preceding factual line.
-
-        Local models commonly emit a claim and put `[FLOW:1]` on the next line.
-        Treating that as two claims unfairly marks the sentence uncited and the
-        citation as a standalone fact. We merge only citation-only lines into a
-        preceding non-heading, non-empty line that does not already contain a
-        Sentinel citation.
-        """
+        """Attach citation-only lines to the preceding factual line."""
         lines = answer.splitlines()
         merged: list[str] = []
         bindings = 0
@@ -83,19 +85,38 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
             reasons.append("Timeline source does not contain telemetry establishing the claimed malicious behavior.")
         return (not reasons, reasons)
 
-    def _flow_entailment(self, claim: str, source: CopilotSource) -> tuple[bool, list[str]]:
+    def _flow_semantic_entailment(self, claim: str, source: CopilotSource) -> tuple[bool, list[str]]:
+        """Per-flow semantic checks that do not require all group facts per flow."""
         lower = claim.casefold()
         blob = self._metadata_blob(source)
         reasons: list[str] = []
         if self._contains_any(lower, self.MALICIOUSNESS_TERMS) and not self._contains_any(blob, self.MALICIOUSNESS_TERMS):
             reasons.append("Network-flow telemetry can establish endpoints/protocol/ports, but does not by itself establish malware or compromise.")
-        for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", claim):
-            if ip.casefold() not in blob:
-                reasons.append(f"Claimed IP {ip} is not present in the cited flow source.")
-        for port in re.findall(r":(\d{1,5})\b", claim):
-            if port not in blob:
-                reasons.append(f"Claimed port {port} is not present in the cited flow source.")
         return (not reasons, reasons)
+
+    def _aggregate_flow_entailment(self, claim: str, sources: list[CopilotSource]) -> tuple[bool, list[str], dict[str, Any]]:
+        """Validate concrete flow facts against the union of all cited flows."""
+        union_blob = " ".join(self._metadata_blob(source) for source in sources)
+        reasons: list[str] = []
+        asserted_ips = list(dict.fromkeys(re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", claim)))
+        asserted_ports = list(dict.fromkeys(re.findall(r":(\d{1,5})\b", claim)))
+
+        missing_ips = [ip for ip in asserted_ips if ip.casefold() not in union_blob]
+        missing_ports = [port for port in asserted_ports if port not in union_blob]
+        for ip in missing_ips:
+            reasons.append(f"Claimed IP {ip} is not present in any cited flow source.")
+        for port in missing_ports:
+            reasons.append(f"Claimed port {port} is not present in any cited flow source.")
+
+        detail = {
+            "source_ids": [source.source_id for source in sources],
+            "asserted_ips": asserted_ips,
+            "asserted_ports": asserted_ports,
+            "missing_ips": missing_ips,
+            "missing_ports": missing_ports,
+            "fact_union": True,
+        }
+        return (not reasons, reasons, detail)
 
     def _sigma_entailment(self, claim: str, source: CopilotSource) -> tuple[bool, list[str]]:
         lower = claim.casefold()
@@ -165,12 +186,28 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
     def _typed_entailment(self, claim: str, cited: list[CopilotSource]) -> tuple[bool, list[str], list[dict[str, Any]]]:
         reasons: list[str] = []
         checks: list[dict[str, Any]] = []
+        flow_sources = [source for source in cited if source.kind.casefold() == "network"]
+
+        # Validate concrete network facts once against the union of all cited
+        # flow sources. This prevents a valid two-flow sentence from requiring
+        # FLOW:1 to contain FLOW:2's endpoints (and vice versa).
+        if flow_sources:
+            aggregate_ok, aggregate_reasons, detail = self._aggregate_flow_entailment(claim, flow_sources)
+            checks.append({
+                "source_id": "FLOW:AGGREGATE",
+                "source_kind": "network_group",
+                "entailed": aggregate_ok,
+                "reasons": aggregate_reasons,
+                "detail": detail,
+            })
+            reasons.extend(aggregate_reasons)
+
         for source in cited:
             kind = source.kind.casefold()
             if kind == "timeline":
                 ok, source_reasons = self._timeline_entailment(claim, source)
             elif kind == "network":
-                ok, source_reasons = self._flow_entailment(claim, source)
+                ok, source_reasons = self._flow_semantic_entailment(claim, source)
             elif kind == "sigma":
                 ok, source_reasons = self._sigma_entailment(claim, source)
             elif kind == "yara":
@@ -190,7 +227,7 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
                 "reasons": source_reasons,
             })
             reasons.extend(source_reasons)
-        return (not reasons, reasons, checks)
+        return (not reasons, list(dict.fromkeys(reasons)), checks)
 
     def verify_claim(self, claim: str) -> ClaimVerification:
         clean = self._strip_markdown(claim)
@@ -235,6 +272,8 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
             "timeline_occurrence_does_not_imply_normality": True,
             "detections_do_not_imply_compromise": True,
             "adjacent_citation_lines_bound": True,
+            "multi_source_fact_union": True,
+            "benign_interpretation_requires_explicit_support": True,
         })
         return result
 
