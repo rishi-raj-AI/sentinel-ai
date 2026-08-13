@@ -1,0 +1,19 @@
+services:
+  sentinel:
+    build: .
+    ports:
+      - "8765:8765"
+    environment:
+      SENTINEL_MAX_REQUEST_BYTES: "2097152"
+    volumes:
+      - ./cases:/app/cases
+      - ./logs:/app/logs
+      - ./config:/app/config
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
