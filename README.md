@@ -61,7 +61,7 @@ Each run records:
 - ATT&CK candidates;
 - evidence-graph statistics;
 - three competing hypotheses with confidence percentages;
-- grounded Copilot synthesis;
+- grounded and claim-verified Copilot synthesis;
 - a timestamped investigation notebook.
 
 Runs are written under `cases/<case-id>/investigations/` as JSON and Markdown files with SHA-256 hashes. Because the run creates notebook artifacts, the CLI asks for modification confirmation even though the forensic analysis itself is read-only.
@@ -80,7 +80,13 @@ The copilot always performs case retrieval before answering. Retrieved sources u
 
 Without model configuration Sentinel stays fully usable and returns deterministic evidence-grounded answers. Sentinel also supports a persisted local model configuration and Ollama native `/api/chat`; the local setup can auto-resolve the installed Ollama model name when configuration is stale.
 
-Model answers must cite source IDs that were actually retrieved; answers with no valid Sentinel citations, unknown citations, provider errors, or timeouts are rejected and replaced with the deterministic grounded fallback.
+Model answers pass through three increasingly strict controls:
+
+1. **Citation grounding** — every Sentinel source ID must come from the retrieved case context; unknown IDs are rejected.
+2. **Provenance canonicalization** — malformed evidence aliases are repaired only when they bind exactly to retrieved evidence filename metadata, and every repair is audited.
+3. **Claim-level verification** — factual model claims are classified as observed, inferred, recommendation, or limitation and checked against cited source content. Unsupported factual claims are removed. If fewer than 50% of factual claims survive, the entire model synthesis is rejected and Sentinel returns the deterministic grounded fallback.
+
+The claim verifier includes explicit guards against common forensic overclaims such as treating validation-only Sigma rules as malware-specific, inferring system updates from YARA match timestamps, or asserting confirmed compromise without supporting assessment evidence.
 
 Check the active mode with:
 
