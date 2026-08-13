@@ -129,9 +129,9 @@ class ModelProvider(BaseModelProvider):
         if configured in installed:
             return configured
 
-        # Prefer the model Sentinel's setup persisted locally. Environment
-        # variables may be stale and take precedence in the base provider.
-        persisted = (self.persisted_model or "").strip()
+        # Provider test doubles and third-party subclasses may not run this
+        # class's __init__. Treat missing persisted_model as simply absent.
+        persisted = str(getattr(self, "persisted_model", None) or "").strip()
         if persisted:
             if persisted in installed:
                 return persisted
@@ -152,9 +152,6 @@ class ModelProvider(BaseModelProvider):
         if latest in installed:
             return latest
 
-        # Common setup-script default: prefer llama3.2 if it is present even
-        # when a stale environment model name is unrelated and multiple models
-        # are installed. This is deterministic, not an arbitrary first-model pick.
         for preferred in ("llama3.2:latest", "llama3.2"):
             if preferred in installed:
                 return preferred
