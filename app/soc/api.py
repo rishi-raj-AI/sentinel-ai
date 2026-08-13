@@ -6,7 +6,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from app.enterprise.workspace import RBAC
-from app.soc.core import SOCSupervisor
+from app.soc.core_v2 import SOCSupervisor
 
 
 class SOCRunRequest(BaseModel):
@@ -24,7 +24,7 @@ def install_soc_routes(app: FastAPI, *, cases_root: str = "cases", sigma_rules: 
     @app.get("/api/soc/agents")
     def list_agents():
         return {
-            "version": "5.0",
+            "version": "5.1",
             "agents": [
                 {"name": "network-analyst", "specialty": "network"},
                 {"name": "detection-analyst", "specialty": "sigma+yara"},
@@ -34,6 +34,11 @@ def install_soc_routes(app: FastAPI, *, cases_root: str = "cases", sigma_rules: 
                 {"name": "soc-supervisor", "specialty": "reconciliation"},
             ],
             "guardrails": {"read_only": True, "endpoint_remediation": False},
+            "quality": {
+                "counter_evidence_confidence": "weighted_top_relevance",
+                "generic_event_penalty": True,
+                "strict_synthesis_contract": True,
+            },
         }
 
     @app.get("/api/soc/cases/{case_id}/runs")
