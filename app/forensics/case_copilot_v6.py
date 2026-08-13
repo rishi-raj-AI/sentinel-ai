@@ -7,15 +7,15 @@ from app.forensics.case_copilot_v5 import (
     CaseCopilot as ProvenanceCaseCopilot,
     ModelProvider,
 )
-from app.forensics.claim_verifier import ClaimEvidenceVerifier
+from app.forensics.source_entailment import SourceAwareClaimVerifier
 
 
 class CaseCopilot(ProvenanceCaseCopilot):
     """Claim-verified evidence-grounded copilot.
 
     v5 proves citations are valid and provenance-safe. v6 additionally verifies
-    factual claims against the cited source content. Unsupported factual claims
-    are removed from model output and preserved in an audit trail. If fewer than
+    factual claims against source-type semantics. Unsupported factual claims are
+    removed from model output and preserved in an audit trail. If fewer than
     half of factual claims survive, Sentinel rejects the model synthesis and
     returns the deterministic grounded answer instead.
     """
@@ -31,6 +31,8 @@ class CaseCopilot(ProvenanceCaseCopilot):
             "minimum_factual_support_ratio": self.MIN_FACTUAL_SUPPORT_RATIO,
             "unsupported_factual_claims_removed": True,
             "weak_model_synthesis_rejected": True,
+            "source_type_aware_entailment": True,
+            "lexical_overlap_secondary_only": True,
         }
 
         if result.get("mode") != "model":
@@ -40,7 +42,7 @@ class CaseCopilot(ProvenanceCaseCopilot):
             CopilotSource(**row) if isinstance(row, dict) else row
             for row in result.get("sources", [])
         ]
-        verifier = ClaimEvidenceVerifier(sources)
+        verifier = SourceAwareClaimVerifier(sources)
         verification = verifier.verify_answer(str(result.get("answer") or ""))
         result["claim_verification"] = verification
         result["claim_verification_applied"] = True
