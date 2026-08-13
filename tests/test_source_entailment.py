@@ -19,6 +19,13 @@ def _verifier():
             metadata={"src": "192.0.2.10", "dst": "198.51.100.20", "dst_port": "4444"},
         ),
         CopilotSource(
+            source_id="FLOW:2",
+            kind="network",
+            title="UDP 192.0.2.10:54001 -> 198.51.100.53:53",
+            text="Network flow protocol=UDP; src=192.0.2.10:54001; dst=198.51.100.53:53; packets=1",
+            metadata={"src": "192.0.2.10", "dst": "198.51.100.53", "dst_port": "53"},
+        ),
+        CopilotSource(
             source_id="SIGMA:sentinel-network-udp-4444:1",
             kind="sigma",
             title="Sentinel Unusual UDP Destination Port",
@@ -85,7 +92,8 @@ def test_brief_supports_recorded_memory_limitation():
     row = _verifier().verify_claim(
         "No successfully parsed memory-forensics artifacts are present [BRIEF:CURRENT]."
     )
-    assert row.status == "LIMITATION"
+    assert row.claim_type == "LIMITATION"
+    assert row.status == "SUPPORTED"
     assert row.support_score == 1.0
 
 
@@ -98,3 +106,14 @@ def test_answer_audit_includes_source_type_checks():
     assert result["policy"]["lexical_overlap_secondary_only"] is True
     assert result["unsupported_claim_count"] == 1
     assert result["source_type_entailment"]
+
+
+def test_adjacent_citation_line_is_bound_to_preceding_claim():
+    result = _verifier().verify_answer(
+        "Two UDP flows were observed from 192.0.2.10.\n"
+        "[FLOW:2, FLOW:1]"
+    )
+    assert result["adjacent_citation_bindings"] == 1
+    assert result["claim_count"] == 1
+    assert result["claims"][0]["source_ids"] == ["FLOW:2", "FLOW:1"]
+    assert "[FLOW:2, FLOW:1]" in result["answer"]
