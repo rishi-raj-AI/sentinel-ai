@@ -8,9 +8,9 @@ from app.forensics.case_copilot import CaseCopilot as BaseCaseCopilot, CopilotSo
 class CaseCopilot(BaseCaseCopilot):
     """Citation-hardened copilot with tolerant formatting normalization.
 
-    The model is still restricted to retrieved Sentinel source IDs, but harmless
-    formatting variants such as multiple IDs inside one bracket, backticks, or a
-    leading ``Source:`` label no longer cause an unnecessary fallback.
+    Only source IDs already present in the retrieved Sentinel context may be
+    normalized. Unknown Sentinel-looking IDs are intentionally left untouched so
+    the grounding validator can reject the model answer.
     """
 
     SOURCE_PREFIXES = ("EVIDENCE", "SIGMA", "YARA", "FLOW", "TIMELINE", "ATTACK", "BRIEF")
@@ -44,8 +44,37 @@ class CaseCopilot(BaseCaseCopilot):
         )
 
     @classmethod
+    def _normalize_citations(cls, answer: str, sources: list[CopilotSource]) -> str:
+        allowed = {source.source_id.upper(): source.source_id for source in sources}
+        normalized = answer
+
+        # Canonicalize backticked valid IDs first.
+        for upper_id, canonical in sorted(allowed.items(), key=lambda item: len(item[0]), reverse=True):
+            normalized = re.sub(
+                rf"`\s*{re.escape(canonical)}\s*`",
+                f"[{canonical}]",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+
+        # Canonicalize valid IDs occurring outside an existing bracket group.
+        bracket_ranges = [(m.start(), m.end()) for m in re.finditer(r"\[[^\[\]]+\]", normalized)]
+        matches: list[tuple[int, int, str]] = []
+        for match in cls.SOURCE_TOKEN_RE.finditer(normalized):
+            token = match.group(0)
+            canonical = allowed.get(token.upper())
+            if not canonical:
+                continue
+            if any(start <= match.start() < end for start, end in bracket_ranges):
+                continue
+            matches.append((match.start(), match.end(), canonical))
+
+        for start, end, canonical in reversed(matches):
+            normalized = normalized[:start] + f"[{canonical}]" + normalized[end:]
+        return normalized
+
+    @classmethod
     def _citation_tokens(cls, answer: str) -> set[str]:
-        """Extract Sentinel source IDs only from square-bracket citation groups."""
         tokens: set[str] = set()
         for bracket in re.findall(r"\[([^\[\]]+)\]", answer):
             cleaned = bracket.replace("`", " ")
@@ -55,7 +84,6 @@ class CaseCopilot(BaseCaseCopilot):
 
     @classmethod
     def _unknown_sentinel_tokens(cls, answer: str, allowed: set[str]) -> set[str]:
-        """Detect invented Sentinel-looking IDs anywhere in the answer."""
         seen = {token.upper() for token in cls.SOURCE_TOKEN_RE.findall(answer)}
         return seen - allowed
 
@@ -73,10 +101,10 @@ class CaseCopilot(BaseCaseCopilot):
 
 
 def install_base_patch() -> None:
-    """Apply the same citation behavior to code that imports the base class."""
     BaseCaseCopilot.SOURCE_TOKEN_RE = CaseCopilot.SOURCE_TOKEN_RE
     BaseCaseCopilot._system_prompt = staticmethod(CaseCopilot._system_prompt)
     BaseCaseCopilot._user_prompt = staticmethod(CaseCopilot._user_prompt)
+    BaseCaseCopilot._normalize_citations = classmethod(CaseCopilot._normalize_citations.__func__)
     BaseCaseCopilot._citation_tokens = classmethod(CaseCopilot._citation_tokens.__func__)
     BaseCaseCopilot._unknown_sentinel_tokens = classmethod(CaseCopilot._unknown_sentinel_tokens.__func__)
     BaseCaseCopilot._citations_are_grounded = classmethod(CaseCopilot._citations_are_grounded.__func__)
