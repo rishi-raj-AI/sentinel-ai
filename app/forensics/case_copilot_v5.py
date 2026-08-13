@@ -31,8 +31,6 @@ class CaseCopilot(RepairCaseCopilot):
             if not filename:
                 continue
 
-            # Paths are reduced to the retrieved basename; aliases are never
-            # generated from directory components.
             basename = filename.replace("\\", "/").rsplit("/", 1)[-1]
             candidate_suffixes = {basename}
             preservation_prefix = f"{evidence_id}_"
@@ -53,8 +51,6 @@ class CaseCopilot(RepairCaseCopilot):
         repairs: list[dict[str, str]] = []
         normalized = answer
 
-        # Replace exact metadata-derived aliases only. Longest-first prevents a
-        # shorter alias from consuming the prefix of a longer preserved name.
         for alias_folded, canonical in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
             pattern = re.compile(
                 rf"(?<![A-Za-z0-9_.:-]){re.escape(alias_folded)}(?![A-Za-z0-9_.:-])",
@@ -82,10 +78,30 @@ class CaseCopilot(RepairCaseCopilot):
     @classmethod
     def _diagnostics(cls, answer: str, sources: list[CopilotSource]) -> dict[str, Any]:
         diagnostics = super()._diagnostics(answer, sources)
-        _, provenance_repairs = cls._canonicalize_evidence_aliases(answer, sources)
-        diagnostics["provenance_repairs_available"] = provenance_repairs
         diagnostics["evidence_alias_count"] = len(cls._evidence_aliases(sources))
         return diagnostics
+
+    def answer(self, question: str, *, max_sources: int = 12) -> dict[str, Any]:
+        result = super().answer(question, max_sources=max_sources)
+        sources = [
+            CopilotSource(**source) if isinstance(source, dict) else source
+            for source in result.get("sources", [])
+        ]
+
+        initial_raw = result.get("raw_model_answer")
+        repaired_raw = result.get("repaired_model_answer")
+        _, initial_repairs = self._canonicalize_evidence_aliases(initial_raw or "", sources)
+        _, repair_pass_repairs = self._canonicalize_evidence_aliases(repaired_raw or "", sources)
+
+        result["provenance_repairs_initial"] = initial_repairs
+        result["provenance_repairs_repair_pass"] = repair_pass_repairs
+        result["provenance_repair_count"] = len(initial_repairs) + len(repair_pass_repairs)
+        result["grounding_policy"] = {
+            "unknown_source_ids_rejected": True,
+            "metadata_bound_aliases_only": True,
+            "provenance_repairs_audited": True,
+        }
+        return result
 
 
 def install_base_patch() -> None:
