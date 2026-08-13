@@ -7,3 +7,17 @@ logs/*.db
 cases/
 config/model.json
 .DS_Store
+
+# Runtime / generated data
+data/
+logs/
+
+# Frontend generated
+frontend/node_modules/
+frontend/dist/
+
+# Runtime workspace artifacts
+workspace/*.jsonl
+workspace/*.evtx
+workspace/*.pcap
+workspace/test-evidence.txt
