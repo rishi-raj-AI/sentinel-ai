@@ -59,7 +59,8 @@ def test_supervisor_contract_forbids_speculative_gap_and_detection_inferences():
     assert "never infer malware absence, presence, infection state, or evasion" in rules
     assert "does not by itself indicate malware" in rules
     assert "test/validation-named rule must not be described as a malware signature" in rules
-    assert "agent names are not source ids" in rules
+    assert "never cite agent names" in rules
+    assert "use only retrieved sentinel source ids as citations" in rules
 
 
 def test_phase5_1_version_and_precision_agent_registration():
