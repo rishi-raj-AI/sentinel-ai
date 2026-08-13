@@ -9,6 +9,7 @@ import './ui2.css'
 import './workspace3a.css'
 import './intelligenceWorkspace.css'
 import './reportStudio.css'
+import './missionActive.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
