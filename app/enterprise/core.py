@@ -111,20 +111,76 @@ class KnowledgeGraphService:
 class InvestigationReasoningService:
     """Explainable hypothesis scoring and counter-evidence search over graph facts."""
 
+    HIGH_SIGNAL_TYPES = {
+        "yara_rule": 3.0,
+        "sigma_rule": 3.0,
+        "evidence": 2.6,
+        "process": 2.4,
+        "file": 2.2,
+        "ip": 2.0,
+        "domain": 2.0,
+        "port": 1.6,
+        "event": 0.7,
+    }
+    GENERIC_TERMS = {"system", "normal", "activity", "event", "service"}
+
     def __init__(self, case_dir: str | Path) -> None:
         self.graph_service = KnowledgeGraphService(case_dir)
 
     def counter_evidence(self, keywords: Iterable[str], *, limit: int = 50) -> list[dict[str, Any]]:
+        """Return counter-evidence candidates ranked by forensic relevance.
+
+        Exact/high-signal matches on evidence, detections, files, processes and
+        network entities outrank broad matches on generic event nodes. Returned
+        rows include an auditable relevance score and matched terms.
+        """
         graph = self.graph_service.snapshot()
-        terms = [k.casefold() for k in keywords if k]
-        rows: list[dict[str, Any]] = []
+        terms = [str(k).strip().casefold() for k in keywords if str(k).strip()]
+        ranked: list[tuple[float, dict[str, Any]]] = []
         for node in graph["nodes"]:
-            blob = f"{node.get('label')} {node.get('attributes')}".casefold()
-            if any(term in blob for term in terms):
-                rows.append(node)
-                if len(rows) >= limit:
-                    break
-        return rows
+            node_type = str(node.get("type") or "unknown").casefold()
+            label = str(node.get("label") or "")
+            node_id = str(node.get("id") or "")
+            attrs = str(node.get("attributes") or "")
+            label_blob = f"{node_id} {label}".casefold()
+            full_blob = f"{label_blob} {attrs.casefold()}"
+            matched = [term for term in terms if term in full_blob]
+            if not matched:
+                continue
+
+            type_weight = self.HIGH_SIGNAL_TYPES.get(node_type, 1.0)
+            score = type_weight
+            exact_label_hits = 0
+            attribute_hits = 0
+            for term in matched:
+                generic_penalty = 0.25 if term in self.GENERIC_TERMS else 1.0
+                if term in label_blob:
+                    exact_label_hits += 1
+                    score += 2.2 * generic_penalty
+                elif term in attrs.casefold():
+                    attribute_hits += 1
+                    score += 1.1 * generic_penalty
+                if term in {"test", "validation", "false positive", "benign", "update", "known"}:
+                    score += 1.5
+
+            # Generic event-only matches are deliberately suppressed so routine
+            # OS logging cannot swamp direct contradictory evidence.
+            if node_type == "event" and all(term in self.GENERIC_TERMS for term in matched):
+                score *= 0.2
+
+            enriched = dict(node)
+            enriched["relevance_score"] = round(score, 3)
+            enriched["matched_terms"] = matched
+            enriched["relevance_components"] = {
+                "node_type_weight": type_weight,
+                "label_hits": exact_label_hits,
+                "attribute_hits": attribute_hits,
+                "generic_event_suppressed": node_type == "event" and all(term in self.GENERIC_TERMS for term in matched),
+            }
+            ranked.append((score, enriched))
+
+        ranked.sort(key=lambda item: (item[0], str(item[1].get("id") or "")), reverse=True)
+        return [row for _, row in ranked[:limit]]
 
     def score_hypothesis(
         self,
