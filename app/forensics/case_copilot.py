@@ -312,6 +312,11 @@ class CaseCopilot:
         allowed = {source.source_id for source in sources}
         return bool(cited) and cited.issubset(allowed)
 
+    @staticmethod
+    def _normalize_citations(answer: str, sources: list[CopilotSource]) -> str:
+        """Hook for citation-compatible subclasses; base behavior is unchanged."""
+        return answer
+
     def answer(self, question: str, *, max_sources: int = 12) -> dict[str, Any]:
         text = question.strip()
         if not text:
@@ -323,6 +328,7 @@ class CaseCopilot:
         if self.provider.configured:
             try:
                 answer = self.provider.complete(self._system_prompt(), self._user_prompt(text, sources))
+                answer = self._normalize_citations(answer, sources)
                 if not self._citations_are_grounded(answer, sources):
                     raise RuntimeError("Model answer did not contain only valid retrieved Sentinel citations")
                 mode = "model"
