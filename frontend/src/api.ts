@@ -59,6 +59,33 @@ export type ToolPlan = {
   policy?: Record<string, boolean>
 }
 
+export type CopilotStatus = {
+  configured?: boolean
+  mode?: string
+  model?: string | null
+  endpoint_configured?: boolean
+  grounding?: string
+}
+
+export type CopilotReply = {
+  answer?: string
+  mode?: string
+  model?: string | null
+  source_count?: number
+  sources?: Array<{ source_id?: string; kind?: string; title?: string }>
+}
+
+export type InvestigationRun = {
+  run_id?: string
+  objective?: string
+  overall_confidence?: string
+  overall_confidence_percent?: number
+  leading_hypothesis?: { statement?: string }
+  hypotheses?: Array<{ id?: string; statement?: string; confidence?: string; confidence_percent?: number }>
+  recommended_actions?: string[]
+  notebook?: Array<{ step?: string; timestamp?: string; status?: string }>
+}
+
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8765').replace(/\/$/, '')
 
 async function get<T>(path: string): Promise<T> {
@@ -98,6 +125,38 @@ export async function loadCommandData() {
 
 export async function loadCaseOverview(caseId: string) {
   return get<any>(`/api/cases/${encodeURIComponent(caseId)}/overview`)
+}
+
+export async function loadCaseTimeline(caseId: string, limit = 250) {
+  return get<any>(`/api/cases/${encodeURIComponent(caseId)}/timeline?limit=${limit}`)
+}
+
+export async function loadCaseGraph(caseId: string) {
+  return get<any>(`/api/cases/${encodeURIComponent(caseId)}/graph?max_nodes=120&max_edges=240`)
+}
+
+export async function loadCaseDetections(caseId: string) {
+  return get<any>(`/api/cases/${encodeURIComponent(caseId)}/detections`)
+}
+
+export async function loadCopilotStatus() {
+  return get<CopilotStatus>('/api/copilot/status')
+}
+
+export async function askCaseCopilot(caseId: string, question: string) {
+  return post<CopilotReply>(`/api/cases/${encodeURIComponent(caseId)}/chat`, { question })
+}
+
+export async function listInvestigations(caseId: string) {
+  return get<InvestigationRun[]>(`/api/cases/${encodeURIComponent(caseId)}/investigations`)
+}
+
+export async function loadInvestigation(caseId: string, runId: string) {
+  return get<InvestigationRun>(`/api/cases/${encodeURIComponent(caseId)}/investigations/${encodeURIComponent(runId)}`)
+}
+
+export async function runInvestigation(caseId: string, objective: string, maxItems = 25) {
+  return post<InvestigationRun>(`/api/cases/${encodeURIComponent(caseId)}/investigations`, { objective, max_items: maxItems })
 }
 
 export async function loadToolInventory() {
