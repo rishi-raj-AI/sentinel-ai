@@ -120,8 +120,8 @@ def test_full_repair_path_enters_model_mode_and_audits_provenance(tmp_path):
     assert "[EVIDENCE:E0004]" in result["answer"]
     assert result["provenance_repair_count"] == 1
     assert result["provenance_repairs_repair_pass"][0]["basis"] == "retrieved_evidence_filename_metadata"
-    assert result["grounding_policy"] == {
-        "unknown_source_ids_rejected": True,
-        "metadata_bound_aliases_only": True,
-        "provenance_repairs_audited": True,
-    }
+    policy = result["grounding_policy"]
+    assert policy["unknown_source_ids_rejected"] is True
+    assert policy["metadata_bound_aliases_only"] is True
+    assert policy["provenance_repairs_audited"] is True
+    assert policy["brief_section_aliases_require_retrieved_nonempty_sections"] is True
