@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Activity, Aperture, Bell, Binary, BrainCircuit, Bug, ChevronRight, CircleDot,
   Command, Database, FlaskConical, GitBranch, Globe2, Hexagon, Layers3, LockKeyhole,
-  Maximize2, Menu, Network, Orbit, Radar, RefreshCw, Search, ServerCog, ShieldCheck,
-  X,
+  Maximize2, Menu, Network, Orbit, PackageCheck, Radar, RefreshCw, Search, ServerCog,
+  ShieldCheck, Wrench, X,
 } from 'lucide-react'
-import { loadCaseOverview, loadCommandData, type CaseSummary } from './api'
+import {
+  loadCaseOverview, loadCommandData, loadToolInventory, planTools,
+  type CaseSummary, type ToolInventory, type ToolPlan,
+} from './api'
 import { AgentWall, FabricMap, GlobeField, RadarField, ReactorXL } from './visuals'
 import { AnalysisWorkspace, ByteMatrix, CoreDialogue, IntelligenceTicker, ReasoningTimeline } from './labVisuals'
 
-type View = 'command'|'cases'|'soc'|'intel'|'graph'|'appsec'|'malware'|'twin'|'research'|'control'
+type View = 'command'|'cases'|'soc'|'intel'|'graph'|'appsec'|'malware'|'twin'|'research'|'control'|'tools'
 type CommandData = Awaited<ReturnType<typeof loadCommandData>>
 
 const nav: { id: View; label: string; icon: any }[] = [
@@ -17,7 +20,8 @@ const nav: { id: View; label: string; icon: any }[] = [
   {id:'soc',label:'SOC Operations',icon:Radar},{id:'intel',label:'Threat Intelligence',icon:Globe2},
   {id:'graph',label:'Knowledge Graph',icon:GitBranch},{id:'appsec',label:'AppSec Lab',icon:Bug},
   {id:'malware',label:'Malware Lab',icon:Binary},{id:'twin',label:'Digital Twin',icon:Orbit},
-  {id:'research',label:'Research Lab',icon:FlaskConical},{id:'control',label:'Control Plane',icon:LockKeyhole},
+  {id:'research',label:'Research Lab',icon:FlaskConical},{id:'tools',label:'Tool Manager',icon:Wrench},
+  {id:'control',label:'Control Plane',icon:LockKeyhole},
 ]
 
 const empty: CommandData = {status:{},cases:[],control:{},twin:{},evaluation:{},insights:{},health:{},ready:{}}
@@ -64,6 +68,21 @@ function InvestigationLab({selected,overview}:{selected?:CaseSummary;overview:an
   </div>
 }
 
+function ToolManagerLab(){
+  const [inventory,setInventory]=useState<ToolInventory>({});const [plan,setPlan]=useState<ToolPlan|undefined>();const [objective,setObjective]=useState('Analyze a suspicious executable and related network traffic');const [busy,setBusy]=useState(false);const [error,setError]=useState('')
+  const refresh=async()=>{setBusy(true);setError('');try{setInventory(await loadToolInventory())}catch(e){setError(String(e))}finally{setBusy(false)}}
+  useEffect(()=>{refresh()},[])
+  const runPlan=async()=>{setBusy(true);setError('');try{setPlan(await planTools(objective))}catch(e){setError(String(e))}finally{setBusy(false)}}
+  const tools=inventory.tools||[];const packs=Object.entries(inventory.packs||{})
+  return <div className="page-transition tool-manager-page"><div className="module-hero"><div className="module-icon"><Wrench size={30}/></div><div><div className="eyebrow">AI CAPABILITY PLANNER / LOCAL TOOLCHAIN</div><h1>Sentinel Tool Manager</h1><p>Sentinel maps case objectives to capabilities, checks the local toolchain, identifies missing or incompatible dependencies and prepares the operator for execution.</p></div></div>
+    <div className="tool-metrics"><Metric label="READY" value={inventory.ready_count??0} sub={`of ${inventory.total_count??0} registered tools`}/><Metric label="REQUIRED" value={`${inventory.required_ready??0}/${inventory.required_total??0}`} sub="core tool readiness" tone="green"/><Metric label="PACKS" value={packs.length} sub="curated capability groups" tone="violet"/><Metric label="MANAGER" value={inventory.manager_version||'v1'} sub="governed recipes" tone="amber"/></div>
+    <div className="module-grid"><Panel title="AI Case Planner" kicker="PLAN → PREPARE → EXECUTE" className="span-2" action={<Pill tone={plan?.ready_to_execute?'green':'amber'}>{plan?.ready_to_execute?'READY':'PREPARE'}</Pill>}><div className="planner-box"><textarea value={objective} onChange={e=>setObjective(e.target.value)} placeholder="Describe the case objective…"/><button className="primary-button" onClick={runPlan} disabled={busy}><BrainCircuit size={15}/>{busy?'ANALYZING…':'PLAN REQUIRED CAPABILITIES'}</button></div>{error&&<div className="tool-error">{error}</div>}{plan&&<div className="plan-result"><div className="plan-head"><strong>{plan.next_action}</strong><span>{plan.required_tools?.length||0} tools mapped</span></div><div className="tool-grid">{plan.required_tools?.map(t=><div className={`tool-card ${t.ready?'ready':'missing'}`} key={t.tool_id}><div><PackageCheck size={17}/><strong>{t.tool_id}</strong></div><p>{t.reason}</p><div className="tool-card-foot"><Pill tone={t.ready?'green':t.installed?'amber':'red'}>{t.ready?'READY':t.installed?'REPAIR':'MISSING'}</Pill><span>{t.one_click_install?'LOCAL AGENT CAPABLE':'OPERATOR MANAGED'}</span></div></div>)}</div></div>}</Panel>
+      <Panel title="Capability Packs" kicker="REGISTERED TOOLCHAIN"><div className="pack-list">{packs.map(([pack,ids])=><div className="pack-row" key={pack}><strong>{pack.toUpperCase()}</strong><span>{ids.length} tools</span><i>{ids.filter(id=>tools.find(t=>t.tool_id===id)?.ready).length}/{ids.length} ready</i></div>)}</div></Panel>
+      <Panel title="Autonomy Boundary" kicker="TRUST MODEL"><div className="status-stack"><div><BrainCircuit/><span>AI planning</span><Pill tone="green">ACTIVE</Pill></div><div><PackageCheck/><span>Dependency checks</span><Pill tone="green">ACTIVE</Pill></div><div><Wrench/><span>One-click install</span><Pill tone="amber">LOCAL AGENT</Pill></div><div><ShieldCheck/><span>Target execution</span><Pill tone="violet">SCOPE GATED</Pill></div></div></Panel>
+      <Panel title="Registered Tools" kicker="READY / MISSING / REPAIR" className="span-2"><div className="tool-table">{tools.map(t=><div className="tool-row" key={t.tool_id}><div className={`tool-status-dot ${t.ready?'ok':t.installed?'warn':'bad'}`}/><div className="tool-name"><strong>{t.name||t.tool_id}</strong><span>{t.pack||'core'} · {t.version||'version unavailable'}</span></div><div className="tool-profiles">{(t.profiles||[]).slice(0,3).map(p=><span key={p}>{p}</span>)}</div><Pill tone={t.ready?'green':t.installed?'amber':'red'}>{t.ready?'READY':t.installed?'REPAIR':'MISSING'}</Pill><span className="install-mode">{t.one_click_install?t.install_manager||'agent':'manual'}</span></div>)}</div></Panel></div>
+  </div>
+}
+
 function LabView({view,data}:{view:View;data:CommandData}){
   const cfg:Record<string,[string,string,any,string]>={soc:['Autonomous SOC','Multi-agent defensive analysis and evidence-grounded triage.',Radar,'X9 SECURITY FUSION'],intel:['Threat Intelligence','Cyber knowledge, generalized insights and source-aware intelligence.',Globe2,'X2 + X12 INTELLIGENCE'],graph:['Knowledge Graph','Traverse vulnerabilities, products, evidence, identities and relationships.',Network,'X2 KNOWLEDGE INTELLIGENCE'],appsec:['AppSec Laboratory','Static code, dependency, secret and supply-chain analysis.',Bug,'X7 SOFTWARE SECURITY'],malware:['Reverse Engineering Lab','Artifact structure, bytes, strings, indicators and behavioral references.',Binary,'X5 ARTIFACT INTELLIGENCE'],twin:['Digital Twin','Predictive infrastructure modeling, path simulation and control coverage.',Orbit,'X8 SIMULATION ENGINE'],research:['Research & Evaluation Lab','Benchmark Sentinel agents with reproducible scenarios and quality metrics.',FlaskConical,'X11 EVALUATION LAB'],control:['Enterprise Control Plane','Tenant policy, autonomy ceilings, approvals and auditable decisions.',ShieldCheck,'X10 GOVERNANCE']}
   const [title,subtitle,Icon,kicker]=cfg[view]||cfg.soc
@@ -86,9 +105,9 @@ export default function App(){
   const healthy=data.health.status==='ok'&&data.ready.status==='ready';const title=useMemo(()=>nav.find(n=>n.id===view)?.label||'Sentinel X',[view])
   const openCase=async(c:CaseSummary)=>{setSelected(c);setView('cases');try{setOverview(await loadCaseOverview(c.case_id))}catch{setOverview(null)}}
   return <div className={`app-shell ${multi?'multi-mode':''}`}><div className="ambient ambient-one"/><div className="ambient ambient-two"/><div className="scanlines"/>
-    <aside className={`sidebar ${menu?'sidebar-open':''}`}><div className="brand"><div className="brand-mark"><ShieldCheck size={18}/></div><div><strong>SENTINEL <b>X</b></strong><span>CYBER OPERATIONS LAB</span></div><button className="sidebar-close" onClick={()=>setMenu(false)}><X size={16}/></button></div><div className="nav-section-label">OPERATIONS</div><nav>{nav.map(({id,label,icon:Icon})=><button key={id} className={view===id?'active':''} onClick={()=>{setView(id);setMenu(false)}}><Icon size={16}/><span>{label}</span>{view===id&&<i/>}</button>)}</nav><div className="sidebar-foot"><div className="core-mini"><div className={`core-dot ${healthy?'ok':'bad'}`}/><div><strong>SENTINEL CORE</strong><span>{healthy?'Systems nominal':'Backend degraded'}</span></div></div><div className="build">UI 2.0 · BACKEND API 1.0</div></div></aside>
+    <aside className={`sidebar ${menu?'sidebar-open':''}`}><div className="brand"><div className="brand-mark"><ShieldCheck size={18}/></div><div><strong>SENTINEL <b>X</b></strong><span>CYBER OPERATIONS LAB</span></div><button className="sidebar-close" onClick={()=>setMenu(false)}><X size={16}/></button></div><div className="nav-section-label">OPERATIONS</div><nav>{nav.map(({id,label,icon:Icon})=><button key={id} className={view===id?'active':''} onClick={()=>{setView(id);setMenu(false)}}><Icon size={16}/><span>{label}</span>{view===id&&<i/>}</button>)}</nav><div className="sidebar-foot"><div className="core-mini"><div className={`core-dot ${healthy?'ok':'bad'}`}/><div><strong>SENTINEL CORE</strong><span>{healthy?'Systems nominal':'Backend degraded'}</span></div></div><div className="build">UI 3.1 · BACKEND API 1.0</div></div></aside>
     <main className="main-shell"><header className="topbar"><button className="mobile-menu" onClick={()=>setMenu(true)}><Menu size={17}/></button><div className="breadcrumb"><span>SENTINEL X</span><ChevronRight size={11}/><strong>{title.toUpperCase()}</strong></div><div className="top-search"><Search size={15}/><input placeholder="Search cases, IOCs, assets, evidence..."/></div><div className="top-actions"><Pill tone={healthy?'green':'red'}>{healthy?'SYSTEM ONLINE':'DEGRADED'}</Pill><button className={loading?'spin':''} onClick={refresh}><RefreshCw size={15}/></button><button onClick={()=>setMulti(!multi)} className={multi?'active-tool':''}><Maximize2 size={15}/></button><button><Bell size={15}/><span className="notification-dot"/></button><div className="operator"><span>RR</span><div><strong>OPERATOR</strong><small>Lead Analyst</small></div></div></div></header>
-      <div className="content">{view==='command'?<CommandCenter data={data} onSelectCase={openCase}/>:view==='cases'?<InvestigationLab selected={selected} overview={overview}/>:<LabView view={view} data={data}/>}</div>
+      <div className="content">{view==='command'?<CommandCenter data={data} onSelectCase={openCase}/>:view==='cases'?<InvestigationLab selected={selected} overview={overview}/>:view==='tools'?<ToolManagerLab/>:<LabView view={view} data={data}/>}</div>
       <div className="telemetry-footer"><span><i className="ok"/> CORE {healthy?'ONLINE':'DEGRADED'}</span><span>API {data.status.backend_api_version||'1.0'}</span><span>{data.status.generation||'X12'}</span><span>CASES {data.cases.length}</span><span>TWIN {Math.round((data.twin.coverage_ratio??0)*100)}%</span><span className="footer-live"><Activity size={10}/> LIVE TELEMETRY</span></div>
     </main>
   </div>
