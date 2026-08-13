@@ -32,14 +32,33 @@ def test_accepts_multiple_valid_ids_inside_one_citation_group():
     assert CaseCopilot._citations_are_grounded(answer, _sources()) is True
 
 
-def test_accepts_backticked_valid_source_id():
+def test_accepts_backticked_valid_source_id_inside_brackets():
     answer = "The rule matched the flow [`SIGMA:sentinel-network-udp-4444:1`]."
     assert CaseCopilot._citations_are_grounded(answer, _sources()) is True
 
 
+def test_normalizes_bare_valid_ids_to_canonical_brackets():
+    answer = "The flow FLOW:2 is supported by Source: EVIDENCE:E0003."
+    normalized = CaseCopilot._normalize_citations(answer, _sources())
+    assert "[FLOW:2]" in normalized
+    assert "[EVIDENCE:E0003]" in normalized
+    assert CaseCopilot._citations_are_grounded(normalized, _sources()) is True
+
+
+def test_normalizes_backticked_valid_ids():
+    answer = "Review `FLOW:2` and `SIGMA:sentinel-network-udp-4444:1`."
+    normalized = CaseCopilot._normalize_citations(answer, _sources())
+    assert "[FLOW:2]" in normalized
+    assert "[SIGMA:sentinel-network-udp-4444:1]" in normalized
+    assert CaseCopilot._citations_are_grounded(normalized, _sources()) is True
+
+
 def test_rejects_invented_source_id_even_with_valid_citation():
-    answer = "Review the flow [FLOW:2], but also see [FLOW:999]."
-    assert CaseCopilot._citations_are_grounded(answer, _sources()) is False
+    answer = "Review FLOW:2, but also see FLOW:999."
+    normalized = CaseCopilot._normalize_citations(answer, _sources())
+    assert "[FLOW:2]" in normalized
+    assert "FLOW:999" in normalized
+    assert CaseCopilot._citations_are_grounded(normalized, _sources()) is False
 
 
 def test_rejects_uncited_answer():
