@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.forensics.case_copilot_v5 import CaseCopilot, ModelProvider
+from app.forensics.case_copilot_v6 import CaseCopilot, ModelProvider
 from app.forensics.case_manager import CaseManager
 
 
@@ -14,7 +14,7 @@ def copilot_status():
         "config_source": provider.config_source,
         "transport": provider.transport,
         "active_endpoint": provider.active_endpoint,
-        "grounding": "case-retrieval-required",
+        "grounding": "case-retrieval-and-claim-verification-required",
     }
 
 
