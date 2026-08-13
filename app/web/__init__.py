@@ -16,6 +16,7 @@ from app.forensics.case_copilot_v6 import install_base_patch
 
 install_base_patch()
 
+from app.cyberbrain.routes import install_x_routes
 from app.enterprise.api import install_enterprise_routes
 from app.soc.api import install_soc_routes
 from app.web.autonomous import install_autonomous_routes
@@ -72,6 +73,7 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
     install_autonomous_routes(app, cases_root=cases_root, sigma_rules=sigma_rules)
     install_enterprise_routes(app, cases_root=cases_root)
     install_soc_routes(app, cases_root=cases_root, sigma_rules=sigma_rules)
+    install_x_routes(app, data_root=os.getenv("SENTINEL_DATA_ROOT", "data"))
 
     max_request_bytes = int(os.getenv("SENTINEL_MAX_REQUEST_BYTES", str(2 * 1024 * 1024)))
     case_root_path = Path(cases_root)
@@ -88,11 +90,7 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
             if too_large:
                 with _METRICS.lock:
                     _METRICS.rejected_large += 1
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": "request body too large", "request_id": request_id},
-                    headers={"X-Request-ID": request_id},
-                )
+                return JSONResponse(status_code=413, content={"detail": "request body too large", "request_id": request_id}, headers={"X-Request-ID": request_id})
 
         started = time.perf_counter()
         response = await call_next(request)
@@ -104,14 +102,7 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        _ACCESS_LOG.info(json.dumps({
-            "event": "http_request",
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-            "latency_ms": round(latency_ms, 3),
-        }, sort_keys=True))
+        _ACCESS_LOG.info(json.dumps({"event": "http_request", "request_id": request_id, "method": request.method, "path": request.url.path, "status": response.status_code, "latency_ms": round(latency_ms, 3)}, sort_keys=True))
         return response
 
     @app.get("/healthz", include_in_schema=False)
@@ -124,11 +115,7 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
         readable = os.access(case_root_path, os.R_OK)
         writable = os.access(case_root_path, os.W_OK)
         ready = readable and writable
-        payload = {
-            "status": "ready" if ready else "not-ready",
-            "service": "sentinel-ai",
-            "checks": {"http": True, "cases_readable": readable, "cases_writable": writable},
-        }
+        payload = {"status": "ready" if ready else "not-ready", "service": "sentinel-ai", "checks": {"http": True, "cases_readable": readable, "cases_writable": writable}}
         if not ready:
             return JSONResponse(status_code=503, content=payload)
         return payload
