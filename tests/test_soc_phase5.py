@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.enterprise.workspace import replay_events
 from app.forensics.case_manager import CaseManager
 from app.forensics.evidence import EvidenceManager
 from app.forensics.timeline import TimelineEvent, TimelineStore
@@ -63,6 +64,8 @@ def test_soc_supervisor_runs_all_specialists_and_persists(monkeypatch, tmp_path)
     assert result["artifacts"]["markdown"]["sha256"]
     assert SOCSupervisor(case_dir).list_runs()[0]["run_id"] == result["run_id"]
     assert SOCSupervisor(case_dir).load_run(result["run_id"])["objective"] == result["objective"]
+    replay = replay_events(case_dir)
+    assert any(row.get("action") == "soc.run" and row.get("item_id") == result["run_id"] for row in replay)
 
 
 def test_soc_preserves_counter_evidence_and_collection_gaps(monkeypatch, tmp_path):
