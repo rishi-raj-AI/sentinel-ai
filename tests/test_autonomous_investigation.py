@@ -66,6 +66,38 @@ def test_agent_runs_plan_hypotheses_and_persists_notebook(tmp_path, monkeypatch)
     assert loaded["objective"] == "Investigate possible malware infection"
 
 
+def test_autonomous_synthesis_normalizes_valid_model_source_ids(tmp_path, monkeypatch):
+    import app.forensics.case_copilot_v3 as copilot_v3
+
+    class FakeProvider:
+        configured = True
+        model = "test-model"
+        configured_model = "test-model"
+        persisted_model = "test-model"
+        resolved_model = None
+        transport = "test"
+        active_endpoint = "http://local.test/chat"
+
+        def complete(self, system_prompt: str, user_prompt: str) -> str:
+            assert "ALLOWED SOURCE IDS" in user_prompt
+            assert "FLOW:1" in user_prompt
+            return "The UDP/4444 flow warrants review because it is unusual. Source: FLOW:1"
+
+    monkeypatch.setattr(copilot_v3, "ModelProvider", FakeProvider)
+    _, case_dir, _ = _case(tmp_path)
+
+    result = AutonomousInvestigationAgent(case_dir).run(
+        "Investigate possible malware infection",
+        max_items=20,
+        persist=False,
+    )
+
+    synthesis = result["synthesis"]
+    assert synthesis["mode"] == "model"
+    assert synthesis["provider_error"] is None
+    assert "[FLOW:1]" in synthesis["answer"]
+
+
 def test_agent_planner_routes_commands():
     plan = plan_command("autonomous investigate DFIR-2026-0001 Investigate possible malware infection")
     assert plan.steps[0].tool == "forensic.autonomous_investigate"
