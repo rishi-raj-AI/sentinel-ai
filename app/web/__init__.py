@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 import time
 import uuid
 from collections import Counter
+from pathlib import Path
 from threading import Lock
 
 from fastapi import Request
@@ -55,6 +58,13 @@ class _RuntimeMetrics:
 
 
 _METRICS = _RuntimeMetrics()
+_ACCESS_LOG = logging.getLogger("sentinel.access")
+if not _ACCESS_LOG.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    _ACCESS_LOG.addHandler(_handler)
+    _ACCESS_LOG.setLevel(logging.INFO)
+    _ACCESS_LOG.propagate = False
 
 
 def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/sigma"):
@@ -64,6 +74,7 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
     install_soc_routes(app, cases_root=cases_root, sigma_rules=sigma_rules)
 
     max_request_bytes = int(os.getenv("SENTINEL_MAX_REQUEST_BYTES", str(2 * 1024 * 1024)))
+    case_root_path = Path(cases_root)
 
     @app.middleware("http")
     async def sentinel_runtime_guard(request: Request, call_next):
@@ -85,13 +96,22 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
 
         started = time.perf_counter()
         response = await call_next(request)
-        _METRICS.observe(response.status_code, (time.perf_counter() - started) * 1000)
+        latency_ms = (time.perf_counter() - started) * 1000
+        _METRICS.observe(response.status_code, latency_ms)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        _ACCESS_LOG.info(json.dumps({
+            "event": "http_request",
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "latency_ms": round(latency_ms, 3),
+        }, sort_keys=True))
         return response
 
     @app.get("/healthz", include_in_schema=False)
@@ -100,7 +120,18 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
 
     @app.get("/readyz", include_in_schema=False)
     def readyz():
-        return {"status": "ready", "service": "sentinel-ai", "checks": {"http": True}}
+        case_root_path.mkdir(parents=True, exist_ok=True)
+        readable = os.access(case_root_path, os.R_OK)
+        writable = os.access(case_root_path, os.W_OK)
+        ready = readable and writable
+        payload = {
+            "status": "ready" if ready else "not-ready",
+            "service": "sentinel-ai",
+            "checks": {"http": True, "cases_readable": readable, "cases_writable": writable},
+        }
+        if not ready:
+            return JSONResponse(status_code=503, content=payload)
+        return payload
 
     @app.get("/metrics", include_in_schema=False)
     def metrics():
