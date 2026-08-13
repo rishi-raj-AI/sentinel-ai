@@ -12,18 +12,25 @@ def _verifier():
             metadata={"source": "macos", "event_type": "log"},
         ),
         CopilotSource(
+            source_id="TIMELINE:32",
+            kind="timeline",
+            title="locationd event",
+            text="timestamp=2026-08-12 source=macos summary=locationd location service update",
+            metadata={"source": "macos", "event_type": "log"},
+        ),
+        CopilotSource(
             source_id="FLOW:1",
             kind="network",
             title="UDP 192.0.2.10:54000 -> 198.51.100.20:4444",
             text="Network flow protocol=UDP; src=192.0.2.10:54000; dst=198.51.100.20:4444; packets=1",
-            metadata={"src": "192.0.2.10", "dst": "198.51.100.20", "dst_port": "4444"},
+            metadata={"src": "192.0.2.10", "src_port": "54000", "dst": "198.51.100.20", "dst_port": "4444"},
         ),
         CopilotSource(
             source_id="FLOW:2",
             kind="network",
             title="UDP 192.0.2.10:54001 -> 198.51.100.53:53",
             text="Network flow protocol=UDP; src=192.0.2.10:54001; dst=198.51.100.53:53; packets=1",
-            metadata={"src": "192.0.2.10", "dst": "198.51.100.53", "dst_port": "53"},
+            metadata={"src": "192.0.2.10", "src_port": "54001", "dst": "198.51.100.53", "dst_port": "53"},
         ),
         CopilotSource(
             source_id="SIGMA:sentinel-network-udp-4444:1",
@@ -58,6 +65,15 @@ def test_timeline_event_does_not_prove_normality():
     assert any("not that the activity was normal" in reason for reason in row.reasons)
 
 
+def test_normal_system_operations_phrase_is_also_rejected():
+    row = _verifier().verify_claim(
+        "Locationd and Searchpartyd logs are likely related to normal system operations [TIMELINE:32, TIMELINE:40]."
+    )
+    assert row.status == "UNSUPPORTED"
+    assert row.claim_type == "INFERRED"
+    assert any("not that the activity was normal" in reason for reason in row.reasons)
+
+
 def test_flow_proves_endpoints_but_not_malware():
     verifier = _verifier()
     supported = verifier.verify_claim(
@@ -70,6 +86,37 @@ def test_flow_proves_endpoints_but_not_malware():
     )
     assert unsupported.status == "UNSUPPORTED"
     assert any("does not by itself establish malware" in reason for reason in unsupported.reasons)
+
+
+def test_multi_flow_claim_uses_union_of_cited_flow_facts():
+    verifier = _verifier()
+    row = verifier.verify_claim(
+        "Two UDP flows were observed: 192.0.2.10:54000 -> 198.51.100.20:4444 and "
+        "192.0.2.10:54001 -> 198.51.100.53:53 [FLOW:1, FLOW:2]."
+    )
+    assert row.status == "SUPPORTED"
+    result = verifier.verify_answer(
+        "Two UDP flows were observed: 192.0.2.10:54000 -> 198.51.100.20:4444 and "
+        "192.0.2.10:54001 -> 198.51.100.53:53 [FLOW:1, FLOW:2]."
+    )
+    aggregate = [
+        check
+        for item in result["source_type_entailment"]
+        for check in item["checks"]
+        if check["source_id"] == "FLOW:AGGREGATE"
+    ]
+    assert aggregate
+    assert aggregate[0]["entailed"] is True
+    assert aggregate[0]["detail"]["missing_ips"] == []
+    assert aggregate[0]["detail"]["missing_ports"] == []
+
+
+def test_multi_flow_claim_rejects_fact_missing_from_all_cited_flows():
+    row = _verifier().verify_claim(
+        "Two UDP flows were observed, including 203.0.113.77:9999 [FLOW:1, FLOW:2]."
+    )
+    assert row.status == "UNSUPPORTED"
+    assert any("not present in any cited flow source" in reason for reason in row.reasons)
 
 
 def test_sigma_validation_rule_is_not_malware_specific():
@@ -104,6 +151,8 @@ def test_answer_audit_includes_source_type_checks():
     )
     assert result["policy"]["source_type_aware_entailment"] is True
     assert result["policy"]["lexical_overlap_secondary_only"] is True
+    assert result["policy"]["multi_source_fact_union"] is True
+    assert result["policy"]["benign_interpretation_requires_explicit_support"] is True
     assert result["unsupported_claim_count"] == 1
     assert result["source_type_entailment"]
 
