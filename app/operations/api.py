@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from app.autonomy.phase7 import MissionOperations
 from app.enterprise.workspace import RBAC
+from app.operations.intelligence_v2 import MissionIntelligenceV2
 
 
 def _require(role: str, permission: str) -> None:
@@ -20,6 +21,7 @@ def _require(role: str, permission: str) -> None:
 
 def install_operations_routes(app: FastAPI, *, data_root: str = "data") -> None:
     operations = MissionOperations(Path(data_root))
+    intelligence = MissionIntelligenceV2(Path(data_root))
 
     @app.get("/api/x/operations/capabilities")
     def capability_plan(objective: str, x_sentinel_role: str = Header(default="viewer")):
@@ -33,6 +35,54 @@ def install_operations_routes(app: FastAPI, *, data_root: str = "data") -> None:
         _require(x_sentinel_role, "case.read")
         try:
             return operations.snapshot(mission_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="mission not found") from exc
+
+    @app.get("/api/x/operations/missions/{mission_id}/workspace")
+    def mission_workspace(mission_id: str, x_sentinel_role: str = Header(default="viewer")):
+        _require(x_sentinel_role, "case.read")
+        try:
+            return intelligence.workspace(mission_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="mission not found") from exc
+
+    @app.get("/api/x/operations/missions/{mission_id}/replay")
+    def mission_replay(mission_id: str, x_sentinel_role: str = Header(default="viewer")):
+        _require(x_sentinel_role, "case.read")
+        try:
+            return intelligence.replay(mission_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="mission not found") from exc
+
+    @app.get("/api/x/operations/missions/{mission_id}/evidence-workspace")
+    def mission_evidence_workspace(mission_id: str, x_sentinel_role: str = Header(default="viewer")):
+        _require(x_sentinel_role, "case.read")
+        try:
+            return intelligence.evidence_workspace(mission_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="mission not found") from exc
+
+    @app.get("/api/x/operations/missions/{mission_id}/twin")
+    def mission_twin(mission_id: str, x_sentinel_role: str = Header(default="viewer")):
+        _require(x_sentinel_role, "case.read")
+        try:
+            return intelligence.twin_projection(mission_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="mission not found") from exc
+
+    @app.get("/api/x/operations/missions/{mission_id}/review")
+    def mission_review(mission_id: str, x_sentinel_role: str = Header(default="viewer")):
+        _require(x_sentinel_role, "case.read")
+        try:
+            return intelligence.multi_agent_review(mission_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="mission not found") from exc
+
+    @app.get("/api/x/operations/missions/{mission_id}/memory")
+    def mission_memory(mission_id: str, limit: int = 8, x_sentinel_role: str = Header(default="viewer")):
+        _require(x_sentinel_role, "case.read")
+        try:
+            return intelligence.related_missions(mission_id, limit=limit)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="mission not found") from exc
 
@@ -65,10 +115,10 @@ def install_operations_routes(app: FastAPI, *, data_root: str = "data") -> None:
             previous = ""
             heartbeat = 0
             while True:
-                snapshot = operations.snapshot(mission_id)
+                snapshot = intelligence.workspace(mission_id)
                 serialized = json.dumps(snapshot, sort_keys=True, default=str)
                 if serialized != previous:
-                    yield f"event: snapshot\ndata: {serialized}\n\n"
+                    yield f"event: workspace\ndata: {serialized}\n\n"
                     previous = serialized
                     heartbeat = 0
                 else:
