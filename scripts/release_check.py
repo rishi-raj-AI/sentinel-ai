@@ -5,6 +5,8 @@ import json
 import subprocess
 import sys
 
+from app.cyberbrain.backend_snapshot import BackendSnapshotService
+
 
 def run(command: list[str]) -> None:
     print("+", " ".join(command), flush=True)
@@ -21,7 +23,8 @@ def main() -> int:
     run([sys.executable, "-m", "pytest", "-q", "--tb=short"])
     if not args.skip_benchmark:
         run([sys.executable, "scripts/benchmark_scale.py", "--events", str(args.benchmark_events)])
-    print(json.dumps({"status": "release-check-passed", "benchmark_events": 0 if args.skip_benchmark else args.benchmark_events}))
+    manifest = BackendSnapshotService("data").write_manifest()
+    print(json.dumps({"status": "release-check-passed", "benchmark_events": 0 if args.skip_benchmark else args.benchmark_events, "backend_manifest": str(manifest)}))
     return 0
 
 
