@@ -122,12 +122,25 @@ class PluginRegistry:
         return self._plugins[name][1](**kwargs)
 
 
+def _append_run_events(rows: list[dict[str, Any]], directory: Path, pattern: str, *, actor: str, action: str) -> None:
+    if not directory.is_dir():
+        return
+    for path in sorted(directory.glob(pattern)):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        rows.append({
+            "timestamp": payload.get("created_at") or payload.get("started_at"),
+            "actor": actor,
+            "action": action,
+            "item_id": payload.get("run_id"),
+        })
+
+
 def replay_events(case_dir: str | Path) -> list[dict[str, Any]]:
-    rows = WorkspaceStore(case_dir).snapshot(role="viewer").get("activity", [])
-    investigations = Path(case_dir) / "investigations"
-    if investigations.is_dir():
-        for path in sorted(investigations.glob("*.json")):
-            try: payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError): continue
-            rows.append({"timestamp": payload.get("created_at") or payload.get("started_at"), "actor": "sentinel-agent", "action": "investigation.run", "item_id": payload.get("run_id")})
+    case_path = Path(case_dir)
+    rows = WorkspaceStore(case_path).snapshot(role="viewer").get("activity", [])
+    _append_run_events(rows, case_path / "investigations", "*.json", actor="sentinel-agent", action="investigation.run")
+    _append_run_events(rows, case_path / "soc_runs", "SOC-*.json", actor="sentinel-soc", action="soc.run")
     return sorted(rows, key=lambda x: str(x.get("timestamp") or ""))
