@@ -7,7 +7,7 @@ from app.forensics.case_copilot_v5 import (
     CaseCopilot as ProvenanceCaseCopilot,
     ModelProvider,
 )
-from app.forensics.source_entailment import SourceAwareClaimVerifier
+from app.forensics.source_entailment_v2 import SourceAwareClaimVerifier
 
 
 class CaseCopilot(ProvenanceCaseCopilot):
@@ -33,6 +33,7 @@ class CaseCopilot(ProvenanceCaseCopilot):
             "weak_model_synthesis_rejected": True,
             "source_type_aware_entailment": True,
             "lexical_overlap_secondary_only": True,
+            "structured_fact_entailment_precedes_lexical_similarity": True,
         }
 
         if result.get("mode") != "model":
