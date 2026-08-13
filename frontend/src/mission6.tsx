@@ -33,6 +33,7 @@ export default function MissionControl(){
         <div className="ops-card"><div className="mission-section-title"><TimerReset size={12}/> REPLAY / HISTORY</div><div className="history-list"><span><i className="ok"/>Objective received</span><span><i className={plan?'ok':''}/>Capability plan generated</span><span><i className={plan?.ready_to_execute?'ok':''}/>Environment prepared</span><span><i/>Approval pending</span><span><i/>Execution pending</span></div></div></div>
       <div className="mission-command"><span>PHASE 7 OPERATIONS SNAPSHOT</span><code>python scripts/phase7_report.py --mission &lt;MISSION_ID&gt;</code></div>
       <div className="mission-state"><CheckCircle2 size={15}/><span>{plan?.ready_to_execute?'ENVIRONMENT READY FOR OPERATOR APPROVAL':'PREPARATION REQUIRED'}</span></div>
+      </div>
     </section></div>}
   </>
 }
