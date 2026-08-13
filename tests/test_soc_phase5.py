@@ -4,7 +4,7 @@ from app.enterprise.workspace import replay_events
 from app.forensics.case_manager import CaseManager
 from app.forensics.evidence import EvidenceManager
 from app.forensics.timeline import TimelineEvent, TimelineStore
-from app.soc.core import SOCSupervisor
+from app.soc.core_v2 import SOCSupervisor
 from app.web import create_dashboard_app
 
 
@@ -48,9 +48,9 @@ def _case(tmp_path):
 
 def test_soc_supervisor_runs_all_specialists_and_persists(monkeypatch, tmp_path):
     root, case_dir, case_id = _case(tmp_path)
-    monkeypatch.setattr("app.soc.core.CaseCopilot", DummyCopilot)
+    monkeypatch.setattr("app.soc.core_v2.CaseCopilot", DummyCopilot)
     result = SOCSupervisor(case_dir).run("Investigate possible malicious activity", role="analyst")
-    assert result["version"] == "5.0"
+    assert result["version"] == "5.1"
     assert result["case_id"] == case_id
     assert result["agent_count"] == 5
     assert {row["agent"] for row in result["agents"]} == {
@@ -70,15 +70,17 @@ def test_soc_supervisor_runs_all_specialists_and_persists(monkeypatch, tmp_path)
 
 def test_soc_preserves_counter_evidence_and_collection_gaps(monkeypatch, tmp_path):
     _, case_dir, _ = _case(tmp_path)
-    monkeypatch.setattr("app.soc.core.CaseCopilot", DummyCopilot)
+    monkeypatch.setattr("app.soc.core_v2.CaseCopilot", DummyCopilot)
     result = SOCSupervisor(case_dir).run("Assess compromise", role="analyst", persist=False)
     detection = next(row for row in result["agents"] if row["agent"] == "detection-analyst")
     memory = next(row for row in result["agents"] if row["agent"] == "memory-analyst")
+    counter = next(row for row in result["agents"] if row["agent"] == "counter-evidence-agent")
     assert detection["contradicting"]
     assert "test-like" in detection["contradicting"][0].lower()
     assert memory["gaps"]
     assert result["collection_gaps"]
     assert result["supervisor_hypothesis"]["components"]["gap_penalty"] > 0
+    assert counter["metrics"]["confidence_method"]["method"] == "weighted_top_relevance"
 
 
 def test_soc_requires_analyst_role(tmp_path):
@@ -92,10 +94,11 @@ def test_soc_requires_analyst_role(tmp_path):
 
 def test_soc_api_roles_history_and_run(monkeypatch, tmp_path):
     root, _, case_id = _case(tmp_path)
-    monkeypatch.setattr("app.soc.core.CaseCopilot", DummyCopilot)
+    monkeypatch.setattr("app.soc.core_v2.CaseCopilot", DummyCopilot)
     client = TestClient(create_dashboard_app(cases_root=str(root)))
     agents = client.get("/api/soc/agents")
     assert agents.status_code == 200
+    assert agents.json()["version"] == "5.1"
     assert len(agents.json()["agents"]) == 6
     denied = client.post(
         f"/api/soc/cases/{case_id}/runs",
