@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Lock
 
 from fastapi import Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.forensics.case_copilot_v6 import install_base_patch
@@ -73,6 +74,23 @@ if not _ACCESS_LOG.handlers:
 
 def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/sigma"):
     app = _create_dashboard_app(cases_root=cases_root, sigma_rules=sigma_rules)
+
+    allowed_origins = [
+        origin.strip()
+        for origin in os.getenv(
+            "SENTINEL_UI_ORIGINS",
+            "http://127.0.0.1:5173,http://localhost:5173",
+        ).split(",")
+        if origin.strip()
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Accept", "X-Sentinel-Role", "X-Request-ID"],
+    )
+
     install_autonomous_routes(app, cases_root=cases_root, sigma_rules=sigma_rules)
     install_enterprise_routes(app, cases_root=cases_root)
     install_soc_routes(app, cases_root=cases_root, sigma_rules=sigma_rules)
