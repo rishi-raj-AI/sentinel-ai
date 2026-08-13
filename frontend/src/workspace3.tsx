@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BrainCircuit, ChevronRight, Command, Crosshair, Eye, Layers3, Maximize2, Play, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react'
+import { ACTIVE_MISSION_KEY, MISSION_EVENT, activeMissionId, loadMissionWorkspace, type MissionWorkspace } from './missionIntelligence'
 
 const commands = [
   ['Command Center','command center'],['Investigations','investigations'],['SOC Operations','soc operations'],
@@ -18,8 +19,19 @@ export default function WorkspaceLayer(){
   const [query,setQuery]=useState('')
   const [dock,setDock]=useState<'none'|'core'|'context'|'replay'>('none')
   const [focus,setFocus]=useState(false)
-  const [replay,setReplay]=useState(72)
+  const [replay,setReplay]=useState(0)
+  const [mission,setMission]=useState<MissionWorkspace>()
   const filtered=useMemo(()=>commands.filter(([label])=>label.toLowerCase().includes(query.toLowerCase())),[query])
+
+  useEffect(()=>{
+    const sync=async()=>{const id=activeMissionId();if(!id){setMission(undefined);return}try{setMission(await loadMissionWorkspace(id))}catch{}}
+    sync()
+    const onMission=(e:Event)=>setMission((e as CustomEvent<MissionWorkspace>).detail)
+    const onStorage=(e:StorageEvent)=>{if(e.key===ACTIVE_MISSION_KEY)sync()}
+    window.addEventListener(MISSION_EVENT,onMission);window.addEventListener('storage',onStorage)
+    const timer=window.setInterval(()=>{if(dock!=='none')sync()},3500)
+    return()=>{window.removeEventListener(MISSION_EVENT,onMission);window.removeEventListener('storage',onStorage);window.clearInterval(timer)}
+  },[dock])
 
   useEffect(()=>{
     const onKey=(e:KeyboardEvent)=>{
@@ -33,6 +45,16 @@ export default function WorkspaceLayer(){
 
   useEffect(()=>{document.body.classList.toggle('focus-mode',focus);return()=>document.body.classList.remove('focus-mode')},[focus])
 
+  const sup=mission?.snapshot?.supervisor
+  const review=mission?.review
+  const evidence=mission?.evidence_workspace?.count||0
+  const frames=mission?.replay?.frames||[]
+  const bars:[string,number][]=[
+    ['Confidence',Math.round((sup?.confidence||0)*100)],['Coverage',Math.round((sup?.coverage||0)*100)],
+    ['Review Quality',Math.round((review?.quality_score||0)*100)],['Evidence',Math.min(100,evidence*10)],
+  ]
+  const replayMax=Math.max(0,frames.length-1);const replaySafe=Math.min(replay,replayMax);const currentFrame=frames[replaySafe]
+
   return <>
     <div className="workspace-dock" aria-label="Workspace dock">
       <button title="Sentinel Core" className={dock==='core'?'active':''} onClick={()=>setDock(dock==='core'?'none':'core')}><BrainCircuit size={16}/></button>
@@ -43,17 +65,17 @@ export default function WorkspaceLayer(){
     </div>
 
     {dock!=='none'&&<aside className="workspace-inspector">
-      <div className="inspector-head"><div><span>WORKSPACE / UI 3.0</span><strong>{dock==='core'?'Sentinel Core':dock==='context'?'Context Inspector':'Case Replay'}</strong></div><button onClick={()=>setDock('none')}><X size={14}/></button></div>
-      {dock==='core'&&<div className="core-inspector"><div className="mini-orbit"><BrainCircuit size={30}/><i/><b/></div><div className="core-bars">{[['Reasoning',88],['Memory',74],['Knowledge',93],['Agent Fabric',81],['Twin Model',66]].map(([n,v])=><div key={String(n)}><span>{n}<b>{v}%</b></span><i><em style={{width:`${v}%`}}/></i></div>)}</div><div className="inspector-note"><Sparkles size={13}/>Operational visualization; workload indicators are UI state, not evidence.</div></div>}
-      {dock==='context'&&<div className="context-stack"><div><Eye/><span><b>Focused Surface</b><small>Current laboratory workspace</small></span><ChevronRight/></div><div><Layers3/><span><b>Evidence Context</b><small>Linked case and graph state</small></span><ChevronRight/></div><div><SlidersHorizontal/><span><b>View Controls</b><small>Layout, density and overlays</small></span><ChevronRight/></div></div>}
-      {dock==='replay'&&<div className="replay-panel"><div className="replay-clock">14:{String(Math.round(replay/2)).padStart(2,'0')}<small>SIMULATION REPLAY</small></div><input type="range" min="0" max="100" value={replay} onChange={e=>setReplay(Number(e.target.value))}/><div className="replay-ticks"><span>13:01</span><span>13:30</span><span>14:00</span><span>14:30</span></div><div className="replay-events"><i className="done"/><i className="done"/><i className="hot"/><i/><i/></div><p>Scrubber demonstrates time-oriented investigation replay. It does not modify case evidence.</p></div>}
+      <div className="inspector-head"><div><span>WORKSPACE / LIVE STATE</span><strong>{dock==='core'?'Sentinel Core':dock==='context'?'Context Inspector':'Case Replay'}</strong></div><button onClick={()=>setDock('none')}><X size={14}/></button></div>
+      {dock==='core'&&<div className="core-inspector"><div className="mini-orbit"><BrainCircuit size={30}/><i/><b/></div>{mission?<><div className="core-bars">{bars.map(([n,v])=><div key={n}><span>{n}<b>{v}{n==='Evidence'?'':'%'}</b></span><i><em style={{width:`${v}%`}}/></i></div>)}</div><div className="inspector-note"><Sparkles size={13}/>{mission.mission_id} · {mission.snapshot?.mission?.status||'unknown'} · {sup?.verdict||'no verdict'}</div></>:<div className="inspector-note"><Sparkles size={13}/>No active mission. Open V2 INTEL and load a mission to populate live indicators.</div>}</div>}
+      {dock==='context'&&<div className="context-stack">{mission?<><div><Eye/><span><b>{mission.snapshot?.mission?.objective||'Active mission'}</b><small>{mission.mission_id} · {mission.snapshot?.mission?.status||'unknown'}</small></span><ChevronRight/></div><div><Layers3/><span><b>Evidence Context</b><small>{evidence} indexed · {sup?.contradictions||0} counter-evidence</small></span><ChevronRight/></div><div><SlidersHorizontal/><span><b>Supervisor</b><small>{Math.round((sup?.confidence||0)*100)}% confidence · {Math.round((sup?.coverage||0)*100)}% coverage</small></span><ChevronRight/></div></>:<div><Eye/><span><b>No active mission</b><small>Load one from V2 Intelligence.</small></span></div>}</div>}
+      {dock==='replay'&&<div className="replay-panel">{frames.length?<><div className="replay-clock">{replaySafe+1}/{frames.length}<small>MISSION REPLAY · {mission?.mission_id}</small></div><input type="range" min="0" max={replayMax} value={replaySafe} onChange={e=>setReplay(Number(e.target.value))}/><div className="replay-ticks"><span>START</span><span>{currentFrame?.state||'observed'}</span><span>END</span></div><div className="replay-events">{frames.slice(0,5).map((f,i)=><i key={f.frame_id} className={i<=replaySafe?'done':''}/>)}</div><p><b>{currentFrame?.label||'Mission event'}</b><br/>{currentFrame?.at?new Date(currentFrame.at).toLocaleString():'No timestamp'}</p></>:<p>No live replay frames. Load a mission from V2 Intelligence first.</p>}</div>}
     </aside>}
 
     {palette&&<div className="palette-backdrop" onMouseDown={()=>setPalette(false)}><div className="command-palette" onMouseDown={e=>e.stopPropagation()}>
       <div className="palette-search"><Search size={17}/><input autoFocus placeholder="Search Sentinel workspaces…" value={query} onChange={e=>setQuery(e.target.value)}/><kbd>ESC</kbd></div>
       <div className="palette-label">NAVIGATE</div>
       <div className="palette-results">{filtered.map(([label,key],i)=><button key={key} onClick={()=>{navigate(key);setPalette(false);setQuery('')}}><span><Command size={14}/>{label}</span><kbd>⌥{i+1}</kbd></button>)}</div>
-      <div className="palette-footer"><span>⌘K command palette</span><span>/ global search</span><span>⌥1—9 navigate</span></div>
+      <div className="palette-footer"><span>⌘K command palette</span><span>/ focus search</span><span>⌥1—9 navigate</span></div>
     </div></div>}
   </>
 }
