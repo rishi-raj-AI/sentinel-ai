@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict
 from typing import Any, Iterable
 
 from app.forensics.case_copilot import CopilotSource
@@ -25,7 +24,10 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         "malware", "malicious", "compromise", "infected", "command-and-control", "c2",
         "persistence", "lateral movement", "credential theft",
     )
-    FLOW_FACT_RE = re.compile(r"\b(?:tcp|udp)?\s*(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+))?\s*(?:->|to)\s*(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+))?", re.I)
+    CITATION_ONLY_RE = re.compile(
+        r"^\s*\[(?:\s*(?:EVIDENCE|SIGMA|YARA|FLOW|TIMELINE|ATTACK|BRIEF):[^\[\],]+\s*,?\s*)+\]\s*$",
+        re.IGNORECASE,
+    )
 
     def __init__(self, sources: Iterable[CopilotSource | dict[str, Any]]) -> None:
         super().__init__(sources)
@@ -38,6 +40,38 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
     def _contains_any(cls, text: str, terms: tuple[str, ...]) -> bool:
         lower = text.casefold()
         return any(term in lower for term in terms)
+
+    @classmethod
+    def _attach_adjacent_citations(cls, answer: str) -> tuple[str, int]:
+        """Attach citation-only lines to the preceding factual line.
+
+        Local models commonly emit a claim and put `[FLOW:1]` on the next line.
+        Treating that as two claims unfairly marks the sentence uncited and the
+        citation as a standalone fact. We merge only citation-only lines into a
+        preceding non-heading, non-empty line that does not already contain a
+        Sentinel citation.
+        """
+        lines = answer.splitlines()
+        merged: list[str] = []
+        bindings = 0
+        for raw in lines:
+            stripped = raw.strip()
+            if cls.CITATION_ONLY_RE.fullmatch(stripped) and merged:
+                idx = len(merged) - 1
+                while idx >= 0 and not merged[idx].strip():
+                    idx -= 1
+                if idx >= 0:
+                    previous = merged[idx].strip()
+                    is_heading = previous.startswith("#") or (
+                        previous.startswith("**") and previous.endswith("**") and len(previous) < 100
+                    )
+                    already_cited = bool(cls._source_ids(previous))
+                    if previous and not is_heading and not already_cited:
+                        merged[idx] = merged[idx].rstrip() + " " + stripped
+                        bindings += 1
+                        continue
+            merged.append(raw)
+        return "\n".join(merged), bindings
 
     def _timeline_entailment(self, claim: str, source: CopilotSource) -> tuple[bool, list[str]]:
         lower = claim.casefold()
@@ -55,8 +89,6 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         reasons: list[str] = []
         if self._contains_any(lower, self.MALICIOUSNESS_TERMS) and not self._contains_any(blob, self.MALICIOUSNESS_TERMS):
             reasons.append("Network-flow telemetry can establish endpoints/protocol/ports, but does not by itself establish malware or compromise.")
-        # If concrete IPs/ports are asserted, every asserted value must occur in
-        # the structured flow source.
         for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", claim):
             if ip.casefold() not in blob:
                 reasons.append(f"Claimed IP {ip} is not present in the cited flow source.")
@@ -126,8 +158,6 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         lower = claim.casefold()
         blob = self._metadata_blob(source)
         reasons: list[str] = []
-        # BRIEF can support explicitly recorded limitations/recommendations, but
-        # cannot be escalated beyond its own confidence language.
         if "high confidence" in lower and "high" not in blob:
             reasons.append("Claim escalates confidence beyond the retrieved case brief.")
         return (not reasons, reasons)
@@ -180,8 +210,6 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         score = self._support_score(clean, cited)
 
         reasons = list(dict.fromkeys(typed_reasons + guardrails))
-        # Lexical score is now a secondary sanity check, not the primary source
-        # of truth. A source-type semantic failure always rejects the claim.
         threshold = 0.12 if claim_type == "INFERRED" else 0.20
         if typed_ok and score < threshold:
             reasons.append(f"Residual claim/source support {score:.3f} is below {threshold:.2f} sanity threshold.")
@@ -190,7 +218,8 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
         return ClaimVerification(clean, claim_type, source_ids, status, score, reasons)
 
     def verify_answer(self, answer: str) -> dict[str, Any]:
-        result = super().verify_answer(answer)
+        bound_answer, binding_count = self._attach_adjacent_citations(answer)
+        result = super().verify_answer(bound_answer)
         typed_checks: list[dict[str, Any]] = []
         for row in result.get("claims", []):
             source_ids = row.get("source_ids") or []
@@ -199,11 +228,13 @@ class SourceAwareClaimVerifier(ClaimEvidenceVerifier):
                 _, _, checks = self._typed_entailment(str(row.get("claim") or ""), cited)
                 typed_checks.append({"claim": row.get("claim"), "checks": checks})
         result["source_type_entailment"] = typed_checks
+        result["adjacent_citation_bindings"] = binding_count
         result["policy"].update({
             "source_type_aware_entailment": True,
             "lexical_overlap_secondary_only": True,
             "timeline_occurrence_does_not_imply_normality": True,
             "detections_do_not_imply_compromise": True,
+            "adjacent_citation_lines_bound": True,
         })
         return result
 
