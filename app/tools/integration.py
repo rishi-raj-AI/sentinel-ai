@@ -43,7 +43,7 @@ class ToolSpec:
 
 
 class ToolRegistry:
-    VERSION = "tools-v2"
+    VERSION = "tools-v3"
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
@@ -77,22 +77,42 @@ class ToolRegistry:
                 ToolProfile("memory-info", "Memory Image Information", "Inspect metadata from an already-acquired memory image.", timeout_seconds=180),
             ], pack="dfir", python_distribution="volatility3"),
 
-            # Curated expansion packs. These are health/discovery entries until an
-            # explicit Sentinel execution profile is implemented and validated.
-            ToolSpec("rustscan", "rustscan", "RustScan", "network", ["--version"], pack="network", optional=True, identity_pattern=r"(?i)rustscan"),
-            ToolSpec("masscan", "masscan", "Masscan", "network", ["--version"], pack="network", optional=True, identity_pattern=r"(?i)masscan"),
-            ToolSpec("nuclei", "nuclei", "Nuclei", "web", ["-version"], pack="web", optional=True, identity_pattern=r"(?i)nuclei"),
-            ToolSpec("ffuf", "ffuf", "ffuf", "web", ["-V"], pack="web", optional=True, identity_pattern=r"(?i)ffuf"),
-            ToolSpec("gobuster", "gobuster", "Gobuster", "web", ["version"], pack="web", optional=True, identity_pattern=r"(?i)gobuster"),
-            ToolSpec("katana", "katana", "Katana", "web", ["-version"], pack="web", optional=True, identity_pattern=r"(?i)katana"),
-            ToolSpec("nikto", "nikto", "Nikto", "web", ["-Version"], pack="web", optional=True, identity_pattern=r"(?i)nikto"),
-            ToolSpec("checkov", "checkov", "Checkov", "appsec", ["--version"], pack="appsec", optional=True, identity_pattern=r"\d+\.\d+"),
-            ToolSpec("syft", "syft", "Syft", "appsec", ["version"], pack="appsec", optional=True, identity_pattern=r"(?i)syft"),
-            ToolSpec("grype", "grype", "Grype", "appsec", ["version"], pack="appsec", optional=True, identity_pattern=r"(?i)grype"),
-            ToolSpec("zeek", "zeek", "Zeek", "network-forensics", ["--version"], pack="dfir", optional=True, identity_pattern=r"(?i)zeek"),
-            ToolSpec("suricata", "suricata", "Suricata", "network-forensics", ["--build-info"], pack="dfir", optional=True, identity_pattern=r"(?i)suricata"),
-            ToolSpec("capa", "capa", "capa", "reverse-engineering", ["--version"], pack="reverse", optional=True, identity_pattern=r"(?i)capa|\d+\.\d+"),
-            ToolSpec("radare2", "radare2", "radare2", "reverse-engineering", ["-v"], pack="reverse", optional=True, identity_pattern=r"(?i)radare2"),
+            ToolSpec("rustscan", "rustscan", "RustScan", "network", ["--version"], pack="network", optional=True, identity_pattern=r"(?i)rustscan", notes="Discovery-only until locally validated."),
+            ToolSpec("masscan", "masscan", "Masscan", "network", ["--version"], pack="network", optional=True, identity_pattern=r"(?i)masscan", notes="Discovery-only until locally validated."),
+            ToolSpec("nuclei", "nuclei", "Nuclei", "web", ["-version"], pack="web", optional=True, identity_pattern=r"(?i)nuclei", notes="Discovery-only until local template/runtime validation."),
+            ToolSpec("ffuf", "ffuf", "ffuf", "web", ["-V"], [
+                ToolProfile("content-discovery", "Rate-limited Content Discovery", "Discover paths on an approved web target using an analyst-supplied local wordlist.", requires_scope=True, requires_approval=True, timeout_seconds=120),
+            ], pack="web", optional=True, identity_pattern=r"(?i)ffuf"),
+            ToolSpec("gobuster", "gobuster", "Gobuster", "web", ["version"], [
+                ToolProfile("directory-discovery", "Rate-limited Directory Discovery", "Enumerate paths on an approved web target using an analyst-supplied local wordlist.", requires_scope=True, requires_approval=True, timeout_seconds=120),
+            ], pack="web", optional=True, identity_pattern=r"(?i)gobuster"),
+            ToolSpec("katana", "katana", "Katana", "web", ["-version"], [
+                ToolProfile("crawl-inventory", "Scoped Crawl Inventory", "Crawl an approved web target with conservative rate and depth limits.", requires_scope=True, timeout_seconds=120),
+            ], pack="web", optional=True, identity_pattern=r"(?i)katana"),
+            ToolSpec("nikto", "nikto", "Nikto", "web", ["-Version"], [
+                ToolProfile("web-baseline", "Approved Web Baseline", "Run a conservative baseline web-server assessment on an approved target.", requires_scope=True, requires_approval=True, timeout_seconds=180),
+            ], pack="web", optional=True, identity_pattern=r"(?i)nikto"),
+            ToolSpec("checkov", "checkov", "Checkov", "appsec", ["--version"], [
+                ToolProfile("iac-audit", "IaC Audit", "Analyze infrastructure-as-code in a confined local project.", timeout_seconds=180),
+            ], pack="appsec", optional=True, identity_pattern=r"\d+\.\d+"),
+            ToolSpec("syft", "syft", "Syft", "appsec", ["version"], [
+                ToolProfile("sbom", "SBOM Generation", "Generate a software bill of materials for a confined local project.", timeout_seconds=180),
+            ], pack="appsec", optional=True, identity_pattern=r"(?i)syft"),
+            ToolSpec("grype", "grype", "Grype", "appsec", ["version"], [
+                ToolProfile("dependency-audit", "Dependency Audit", "Analyze a confined local project for known vulnerable packages.", timeout_seconds=180),
+            ], pack="appsec", optional=True, identity_pattern=r"(?i)grype"),
+            ToolSpec("zeek", "zeek", "Zeek", "network-forensics", ["--version"], [
+                ToolProfile("pcap-logs", "PCAP Log Extraction", "Process an already-acquired packet capture into Zeek logs.", timeout_seconds=180),
+            ], pack="dfir", optional=True, identity_pattern=r"(?i)zeek"),
+            ToolSpec("suricata", "suricata", "Suricata", "network-forensics", ["--build-info"], [
+                ToolProfile("pcap-ids", "Offline PCAP IDS", "Evaluate an already-acquired packet capture with local Suricata rules.", timeout_seconds=240),
+            ], pack="dfir", optional=True, identity_pattern=r"(?i)suricata"),
+            ToolSpec("capa", "capa", "capa", "reverse-engineering", ["--version"], [
+                ToolProfile("capability-analysis", "Capability Analysis", "Extract behavioral capabilities from a confined local executable artifact.", timeout_seconds=180),
+            ], pack="reverse", optional=True, identity_pattern=r"(?i)capa|\d+\.\d+"),
+            ToolSpec("radare2", "radare2", "radare2", "reverse-engineering", ["-v"], [
+                ToolProfile("binary-info", "Binary Information", "Extract basic structure, sections, imports and symbols from a confined local binary.", timeout_seconds=120),
+            ], pack="reverse", optional=True, identity_pattern=r"(?i)radare2"),
         ]
         self._tools = {tool.tool_id: tool for tool in defaults}
 
@@ -181,7 +201,7 @@ class ToolRegistry:
 class ToolRunner:
     """Governed adapter runner. Executes predefined argv profiles only; never invokes a shell."""
 
-    VERSION = "runner-v1"
+    VERSION = "runner-v2"
 
     def __init__(self, data_root: str | Path = "data", registry: ToolRegistry | None = None) -> None:
         self.data_root = Path(data_root)
@@ -191,8 +211,10 @@ class ToolRunner:
         self.audit_path = self.data_root / "tool_audit.jsonl"
         self.project_root = (self.data_root / "projects").resolve()
         self.artifact_root = (self.data_root / "artifacts").resolve()
+        self.wordlist_root = (self.data_root / "wordlists").resolve()
         self.project_root.mkdir(parents=True, exist_ok=True)
         self.artifact_root.mkdir(parents=True, exist_ok=True)
+        self.wordlist_root.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _now() -> str:
@@ -234,6 +256,21 @@ class ToolRunner:
             return [binary, "-u", self._safe_target(target or ""), "-status-code", "-title", "-tech-detect", "-json", "-silent"]
         if tool_id == "whatweb" and profile_id == "technology-fingerprint":
             return [binary, "--log-json=-", "--no-errors", self._safe_target(target or "")]
+        if tool_id == "ffuf" and profile_id == "content-discovery":
+            wordlist = self._confined(self.wordlist_root, path or "")
+            if not wordlist.is_file():
+                raise FileNotFoundError("wordlist not found")
+            base = self._safe_target(target or "").rstrip("/")
+            return [binary, "-w", str(wordlist), "-u", f"{base}/FUZZ", "-rate", "20", "-t", "10", "-maxtime", "60", "-of", "json", "-s"]
+        if tool_id == "gobuster" and profile_id == "directory-discovery":
+            wordlist = self._confined(self.wordlist_root, path or "")
+            if not wordlist.is_file():
+                raise FileNotFoundError("wordlist not found")
+            return [binary, "dir", "-u", self._safe_target(target or ""), "-w", str(wordlist), "-t", "10", "--timeout", "5s", "--no-error", "--no-progress"]
+        if tool_id == "katana" and profile_id == "crawl-inventory":
+            return [binary, "-u", self._safe_target(target or ""), "-d", "2", "-rl", "20", "-silent", "-jsonl"]
+        if tool_id == "nikto" and profile_id == "web-baseline":
+            return [binary, "-h", self._safe_target(target or ""), "-maxtime", "120s", "-Display", "V", "-Format", "json"]
         if tool_id == "semgrep" and profile_id == "source-audit":
             project = self._confined(self.project_root, path or "")
             if not project.exists():
@@ -244,16 +281,51 @@ class ToolRunner:
             if not project.exists():
                 raise FileNotFoundError("project not found")
             return [binary, "fs", "--format", "json", "--scanners", "vuln,misconfig,secret", str(project)]
+        if tool_id == "checkov" and profile_id == "iac-audit":
+            project = self._confined(self.project_root, path or "")
+            if not project.exists():
+                raise FileNotFoundError("project not found")
+            return [binary, "-d", str(project), "-o", "json", "--quiet"]
+        if tool_id == "syft" and profile_id == "sbom":
+            project = self._confined(self.project_root, path or "")
+            if not project.exists():
+                raise FileNotFoundError("project not found")
+            return [binary, str(project), "-o", "json"]
+        if tool_id == "grype" and profile_id == "dependency-audit":
+            project = self._confined(self.project_root, path or "")
+            if not project.exists():
+                raise FileNotFoundError("project not found")
+            return [binary, f"dir:{project}", "-o", "json"]
         if tool_id == "tshark" and profile_id == "pcap-summary":
             artifact = self._confined(self.artifact_root, path or "")
             if not artifact.is_file():
                 raise FileNotFoundError("artifact not found")
             return [binary, "-r", str(artifact), "-q", "-z", "conv,ip"]
+        if tool_id == "zeek" and profile_id == "pcap-logs":
+            artifact = self._confined(self.artifact_root, path or "")
+            if not artifact.is_file():
+                raise FileNotFoundError("artifact not found")
+            return [binary, "-r", str(artifact), "LogAscii::use_json=T"]
+        if tool_id == "suricata" and profile_id == "pcap-ids":
+            artifact = self._confined(self.artifact_root, path or "")
+            if not artifact.is_file():
+                raise FileNotFoundError("artifact not found")
+            return [binary, "-r", str(artifact), "-l", str(self.artifact_root)]
         if tool_id == "volatility3" and profile_id == "memory-info":
             artifact = self._confined(self.artifact_root, path or "")
             if not artifact.is_file():
                 raise FileNotFoundError("artifact not found")
             return [binary, "-f", str(artifact), "windows.info"]
+        if tool_id == "capa" and profile_id == "capability-analysis":
+            artifact = self._confined(self.artifact_root, path or "")
+            if not artifact.is_file():
+                raise FileNotFoundError("artifact not found")
+            return [binary, "-j", str(artifact)]
+        if tool_id == "radare2" and profile_id == "binary-info":
+            artifact = self._confined(self.artifact_root, path or "")
+            if not artifact.is_file():
+                raise FileNotFoundError("artifact not found")
+            return [binary, "-2", "-q", "-c", "ij; iSj; iij; isj", str(artifact)]
         raise ValueError("profile requires adapter-specific configuration not yet registered")
 
     def _audit(self, row: dict[str, Any]) -> None:
