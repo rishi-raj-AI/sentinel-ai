@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import re
@@ -9,7 +10,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from app.cyberbrain.engagements import EngagementStore
 
@@ -33,12 +34,16 @@ class ToolSpec:
     domain: str
     version_args: list[str]
     profiles: list[ToolProfile] = field(default_factory=list)
+    pack: str = "core"
+    optional: bool = False
+    identity_pattern: str | None = None
+    python_distribution: str | None = None
     homepage: str | None = None
     notes: str | None = None
 
 
 class ToolRegistry:
-    VERSION = "tools-v1"
+    VERSION = "tools-v2"
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
@@ -49,55 +54,128 @@ class ToolRegistry:
             ToolSpec("nmap", "nmap", "Nmap", "network", ["--version"], [
                 ToolProfile("host-discovery", "Host Discovery", "Discover responsive hosts in an approved scope.", requires_scope=True, timeout_seconds=120),
                 ToolProfile("service-inventory", "Service Inventory", "Inventory exposed TCP services on an approved target.", requires_scope=True, timeout_seconds=180),
-            ]),
-            ToolSpec("httpx", "httpx", "HTTPX", "web", ["-version"], [
+            ], pack="network", identity_pattern=r"Nmap version"),
+            ToolSpec("httpx", "httpx", "ProjectDiscovery HTTPX", "web", ["-version"], [
                 ToolProfile("http-inventory", "HTTP Inventory", "Collect basic HTTP service metadata for an approved target.", requires_scope=True, timeout_seconds=90),
-            ]),
+            ], pack="web", identity_pattern=r"(?i)(projectdiscovery|current version|httpx.*v?\d)"),
             ToolSpec("whatweb", "whatweb", "WhatWeb", "web", ["--version"], [
                 ToolProfile("technology-fingerprint", "Technology Fingerprint", "Identify web technologies on an approved target.", requires_scope=True, timeout_seconds=90),
-            ]),
+            ], pack="web", optional=True, identity_pattern=r"(?i)whatweb", notes="Optional upstream-installed adapter; not required for core web inventory."),
             ToolSpec("semgrep", "semgrep", "Semgrep", "appsec", ["--version"], [
                 ToolProfile("source-audit", "Source Audit", "Run static source-code analysis against a local project.", timeout_seconds=180),
-            ]),
+            ], pack="appsec", identity_pattern=r"\d+\.\d+"),
             ToolSpec("trivy", "trivy", "Trivy", "appsec", ["--version"], [
                 ToolProfile("filesystem-audit", "Filesystem Audit", "Inspect a local project for dependency and configuration findings.", timeout_seconds=180),
-            ]),
+            ], pack="appsec", identity_pattern=r"(?i)version"),
             ToolSpec("yara", "yara", "YARA", "malware", ["--version"], [
                 ToolProfile("artifact-match", "Artifact Match", "Evaluate local artifacts against analyst-selected YARA rules.", timeout_seconds=120),
-            ]),
+            ], pack="dfir", identity_pattern=r"\d+\.\d+"),
             ToolSpec("tshark", "tshark", "TShark", "network-forensics", ["--version"], [
                 ToolProfile("pcap-summary", "PCAP Summary", "Summarize an already-acquired packet capture.", timeout_seconds=120),
-            ]),
+            ], pack="dfir", identity_pattern=r"(?i)tshark.*wireshark"),
             ToolSpec("volatility3", "vol", "Volatility 3", "dfir", ["--help"], [
                 ToolProfile("memory-info", "Memory Image Information", "Inspect metadata from an already-acquired memory image.", timeout_seconds=180),
-            ]),
+            ], pack="dfir", python_distribution="volatility3"),
+
+            # Curated expansion packs. These are health/discovery entries until an
+            # explicit Sentinel execution profile is implemented and validated.
+            ToolSpec("rustscan", "rustscan", "RustScan", "network", ["--version"], pack="network", optional=True, identity_pattern=r"(?i)rustscan"),
+            ToolSpec("masscan", "masscan", "Masscan", "network", ["--version"], pack="network", optional=True, identity_pattern=r"(?i)masscan"),
+            ToolSpec("nuclei", "nuclei", "Nuclei", "web", ["-version"], pack="web", optional=True, identity_pattern=r"(?i)nuclei"),
+            ToolSpec("ffuf", "ffuf", "ffuf", "web", ["-V"], pack="web", optional=True, identity_pattern=r"(?i)ffuf"),
+            ToolSpec("gobuster", "gobuster", "Gobuster", "web", ["version"], pack="web", optional=True, identity_pattern=r"(?i)gobuster"),
+            ToolSpec("katana", "katana", "Katana", "web", ["-version"], pack="web", optional=True, identity_pattern=r"(?i)katana"),
+            ToolSpec("nikto", "nikto", "Nikto", "web", ["-Version"], pack="web", optional=True, identity_pattern=r"(?i)nikto"),
+            ToolSpec("checkov", "checkov", "Checkov", "appsec", ["--version"], pack="appsec", optional=True, identity_pattern=r"\d+\.\d+"),
+            ToolSpec("syft", "syft", "Syft", "appsec", ["version"], pack="appsec", optional=True, identity_pattern=r"(?i)syft"),
+            ToolSpec("grype", "grype", "Grype", "appsec", ["version"], pack="appsec", optional=True, identity_pattern=r"(?i)grype"),
+            ToolSpec("zeek", "zeek", "Zeek", "network-forensics", ["--version"], pack="dfir", optional=True, identity_pattern=r"(?i)zeek"),
+            ToolSpec("suricata", "suricata", "Suricata", "network-forensics", ["--build-info"], pack="dfir", optional=True, identity_pattern=r"(?i)suricata"),
+            ToolSpec("capa", "capa", "capa", "reverse-engineering", ["--version"], pack="reverse", optional=True, identity_pattern=r"(?i)capa|\d+\.\d+"),
+            ToolSpec("radare2", "radare2", "radare2", "reverse-engineering", ["-v"], pack="reverse", optional=True, identity_pattern=r"(?i)radare2"),
         ]
         self._tools = {tool.tool_id: tool for tool in defaults}
 
-    def list(self) -> list[dict[str, Any]]:
-        return [asdict(self._tools[k]) for k in sorted(self._tools)]
+    def list(self, *, pack: str | None = None) -> list[dict[str, Any]]:
+        specs = [self._tools[k] for k in sorted(self._tools)]
+        if pack:
+            specs = [spec for spec in specs if spec.pack == pack]
+        return [asdict(spec) for spec in specs]
+
+    def packs(self) -> dict[str, list[str]]:
+        rows: dict[str, list[str]] = {}
+        for spec in self._tools.values():
+            rows.setdefault(spec.pack, []).append(spec.tool_id)
+        return {pack: sorted(ids) for pack, ids in sorted(rows.items())}
 
     def get(self, tool_id: str) -> ToolSpec:
         if tool_id not in self._tools:
             raise KeyError(tool_id)
         return self._tools[tool_id]
 
+    @staticmethod
+    def _distribution_version(name: str | None) -> str | None:
+        if not name:
+            return None
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
     def health(self, tool_id: str | None = None) -> list[dict[str, Any]]:
         specs = [self.get(tool_id)] if tool_id else [self._tools[k] for k in sorted(self._tools)]
         rows = []
         for spec in specs:
             path = shutil.which(spec.binary)
-            version = None
+            version = self._distribution_version(spec.python_distribution)
             error = None
-            if path:
+            compatible = False
+            if path and version is None:
                 try:
                     proc = subprocess.run([path, *spec.version_args], capture_output=True, text=True, timeout=8, check=False)
-                    text = (proc.stdout or proc.stderr or "").strip().splitlines()
-                    version = text[0][:200] if text else None
+                    text = "\n".join(x for x in [proc.stdout, proc.stderr] if x).strip()
+                    lines = text.splitlines()
+                    version = lines[0][:200] if lines else None
+                    if spec.identity_pattern:
+                        compatible = bool(re.search(spec.identity_pattern, text or "", re.IGNORECASE))
+                    else:
+                        compatible = proc.returncode == 0
                 except (OSError, subprocess.SubprocessError) as exc:
                     error = str(exc)
-            rows.append({"tool_id": spec.tool_id, "name": spec.name, "binary": spec.binary, "installed": bool(path), "path": path, "version": version, "error": error})
+            elif path and version is not None:
+                compatible = True
+
+            installed = bool(path)
+            if installed and not compatible and not error:
+                error = "binary found, but identity/version output does not match the expected security tool"
+            rows.append({
+                "tool_id": spec.tool_id,
+                "name": spec.name,
+                "binary": spec.binary,
+                "pack": spec.pack,
+                "optional": spec.optional,
+                "installed": installed,
+                "compatible": compatible,
+                "ready": installed and compatible,
+                "path": path,
+                "version": version,
+                "profiles": [p.profile_id for p in spec.profiles],
+                "error": error,
+            })
         return rows
+
+    def summary(self) -> dict[str, Any]:
+        rows = self.health()
+        required = [r for r in rows if not r["optional"]]
+        return {
+            "version": self.VERSION,
+            "ready_count": sum(1 for r in rows if r["ready"]),
+            "total_count": len(rows),
+            "required_ready": sum(1 for r in required if r["ready"]),
+            "required_total": len(required),
+            "packs": self.packs(),
+            "tools": rows,
+        }
 
 
 class ToolRunner:
@@ -143,9 +221,10 @@ class ToolRunner:
 
     def _argv(self, tool_id: str, profile_id: str, target: str | None, path: str | None) -> list[str]:
         spec = self.registry.get(tool_id)
-        binary = shutil.which(spec.binary)
-        if not binary:
-            raise FileNotFoundError(f"tool not installed: {tool_id}")
+        health = self.registry.health(tool_id)[0]
+        if not health["ready"]:
+            raise FileNotFoundError(f"tool not ready: {tool_id}: {health.get('error') or 'not installed'}")
+        binary = str(health["path"])
 
         if tool_id == "nmap" and profile_id == "host-discovery":
             return [binary, "-sn", "--reason", self._safe_target(target or "")]
