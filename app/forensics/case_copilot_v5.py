@@ -14,18 +14,10 @@ class CaseCopilot(RepairCaseCopilot):
     """Provenance-aware grounded copilot.
 
     Extends citation repair with metadata-bound evidence alias canonicalization.
-    A malformed evidence citation may be repaired only when its suffix can be
-    derived exactly from filename metadata on the same retrieved evidence
+    A malformed evidence citation may be repaired only when it exactly matches
+    an alias derived from filename metadata on the same retrieved evidence
     source. Arbitrary evidence/filename combinations remain invalid.
     """
-
-    EVIDENCE_ALIAS_RE = re.compile(r"\bEVIDENCE:(E\d{4,})_([A-Za-z0-9_.() -]+)", re.IGNORECASE)
-
-    @staticmethod
-    def _norm_filename(value: str) -> str:
-        # Case-insensitive filesystem-style comparison while preserving only the
-        # filename token itself; paths are never accepted as evidence aliases.
-        return value.strip().replace("\\", "/").rsplit("/", 1)[-1].casefold()
 
     @classmethod
     def _evidence_aliases(cls, sources: list[CopilotSource]) -> dict[str, str]:
@@ -39,20 +31,18 @@ class CaseCopilot(RepairCaseCopilot):
             if not filename:
                 continue
 
+            # Paths are reduced to the retrieved basename; aliases are never
+            # generated from directory components.
             basename = filename.replace("\\", "/").rsplit("/", 1)[-1]
-            # Two model mistakes are safe to canonicalize because both are
-            # derived entirely from the retrieved evidence record:
-            #   EVIDENCE:E0004_yara-test-artifact.txt
-            #   EVIDENCE:E0004_yara-test-artifact.txt when filename already
-            #   contains the E0004_ preservation prefix.
             candidate_suffixes = {basename}
-            prefix = f"{evidence_id}_"
-            if basename.casefold().startswith(prefix.casefold()):
-                candidate_suffixes.add(basename[len(prefix):])
+            preservation_prefix = f"{evidence_id}_"
+            if basename.casefold().startswith(preservation_prefix.casefold()):
+                candidate_suffixes.add(basename[len(preservation_prefix):])
 
             for suffix in candidate_suffixes:
-                alias = f"EVIDENCE:{evidence_id}_{suffix}".casefold()
-                aliases[alias] = source.source_id
+                if not suffix:
+                    continue
+                aliases[f"EVIDENCE:{evidence_id}_{suffix}".casefold()] = source.source_id
         return aliases
 
     @classmethod
@@ -61,27 +51,31 @@ class CaseCopilot(RepairCaseCopilot):
     ) -> tuple[str, list[dict[str, str]]]:
         aliases = cls._evidence_aliases(sources)
         repairs: list[dict[str, str]] = []
-        if not aliases:
-            return answer, repairs
+        normalized = answer
 
-        def replace(match: re.Match[str]) -> str:
-            raw = match.group(0)
-            canonical = aliases.get(raw.casefold())
-            if not canonical:
-                return raw
-            repairs.append({
-                "original": raw,
-                "canonical": canonical,
-                "basis": "retrieved_evidence_filename_metadata",
-            })
-            return canonical
+        # Replace exact metadata-derived aliases only. Longest-first prevents a
+        # shorter alias from consuming the prefix of a longer preserved name.
+        for alias_folded, canonical in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
+            pattern = re.compile(
+                rf"(?<![A-Za-z0-9_.:-]){re.escape(alias_folded)}(?![A-Za-z0-9_.:-])",
+                re.IGNORECASE,
+            )
 
-        return cls.EVIDENCE_ALIAS_RE.sub(replace, answer), repairs
+            def replace(match: re.Match[str], canonical_id: str = canonical) -> str:
+                raw = match.group(0)
+                repairs.append({
+                    "original": raw,
+                    "canonical": canonical_id,
+                    "basis": "retrieved_evidence_filename_metadata",
+                })
+                return canonical_id
+
+            normalized = pattern.sub(replace, normalized)
+
+        return normalized, repairs
 
     @classmethod
     def _normalize_citations(cls, answer: str, sources: list[CopilotSource]) -> str:
-        # First collapse only metadata-proven evidence aliases, then let the v2
-        # canonicalizer add square brackets around retrieved source IDs.
         canonicalized, _ = cls._canonicalize_evidence_aliases(answer, sources)
         return super()._normalize_citations(canonicalized, sources)
 
