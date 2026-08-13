@@ -22,15 +22,17 @@ def _verifier():
             source_id="FLOW:1",
             kind="network",
             title="UDP 192.0.2.10:54000 -> 198.51.100.20:4444",
-            text="Network flow protocol=UDP; src=192.0.2.10:54000; dst=198.51.100.20:4444; packets=1",
-            metadata={"src": "192.0.2.10", "src_port": "54000", "dst": "198.51.100.20", "dst_port": "4444"},
+            text="Network flow protocol=UDP; src=192.0.2.10:54000; dst=198.51.100.20:4444; packets=1; evidence=['E0003']",
+            evidence_id="E0003",
+            metadata={"src": "192.0.2.10", "src_port": "54000", "dst": "198.51.100.20", "dst_port": "4444", "packets": 1, "evidence_id": "E0003"},
         ),
         CopilotSource(
             source_id="FLOW:2",
             kind="network",
             title="UDP 192.0.2.10:54001 -> 198.51.100.53:53",
-            text="Network flow protocol=UDP; src=192.0.2.10:54001; dst=198.51.100.53:53; packets=1",
-            metadata={"src": "192.0.2.10", "src_port": "54001", "dst": "198.51.100.53", "dst_port": "53"},
+            text="Network flow protocol=UDP; src=192.0.2.10:54001; dst=198.51.100.53:53; packets=1; evidence=['E0003']",
+            evidence_id="E0003",
+            metadata={"src": "192.0.2.10", "src_port": "54001", "dst": "198.51.100.53", "dst_port": "53", "packets": 1, "evidence_id": "E0003"},
         ),
         CopilotSource(
             source_id="SIGMA:sentinel-network-udp-4444:1",
@@ -106,9 +108,13 @@ def test_multi_flow_claim_uses_union_of_cited_flow_facts():
         if check["source_id"] == "FLOW:AGGREGATE"
     ]
     assert aggregate
+    detail = aggregate[0]["detail"]
     assert aggregate[0]["entailed"] is True
-    assert aggregate[0]["detail"]["missing_ips"] == []
-    assert aggregate[0]["detail"]["missing_ports"] == []
+    assert detail["missing_ips"] == []
+    assert detail["missing_ports"] == []
+    assert detail["asserted_ports"] == ["54000", "4444", "54001", "53"]
+    assert "1" not in detail["asserted_ports"] and "2" not in detail["asserted_ports"]
+    assert detail["citations_removed_before_fact_extraction"] is True
 
 
 def test_multi_flow_claim_rejects_fact_missing_from_all_cited_flows():
@@ -117,6 +123,39 @@ def test_multi_flow_claim_rejects_fact_missing_from_all_cited_flows():
     )
     assert row.status == "UNSUPPORTED"
     assert any("not present in any cited flow source" in reason for reason in row.reasons)
+
+
+def test_flow_packet_count_and_evidence_association_are_verified():
+    verifier = _verifier()
+    row = verifier.verify_claim(
+        "The cited flows each have a low packet count and are associated with evidence E0003 [FLOW:1, FLOW:2]."
+    )
+    assert row.status == "SUPPORTED"
+    result = verifier.verify_answer(
+        "The cited flows each have a low packet count and are associated with evidence E0003 [FLOW:1, FLOW:2]."
+    )
+    aggregate = result["source_type_entailment"][0]["checks"][0]
+    detail = aggregate["detail"]
+    assert detail["source_packet_counts"] == {"FLOW:1": 1, "FLOW:2": 1}
+    assert detail["low_packet_claimed"] is True
+    assert detail["low_packet_supported"] is True
+    assert detail["asserted_evidence_ids"] == ["E0003"]
+    assert detail["missing_evidence_ids"] == []
+
+
+def test_wrong_packet_count_or_evidence_association_is_rejected():
+    verifier = _verifier()
+    packet = verifier.verify_claim(
+        "The flows contain 99 packets [FLOW:1, FLOW:2]."
+    )
+    assert packet.status == "UNSUPPORTED"
+    assert any("packet count 99" in reason for reason in packet.reasons)
+
+    evidence = verifier.verify_claim(
+        "The flows are associated with evidence E9999 [FLOW:1, FLOW:2]."
+    )
+    assert evidence.status == "UNSUPPORTED"
+    assert any("evidence association E9999" in reason for reason in evidence.reasons)
 
 
 def test_sigma_validation_rule_is_not_malware_specific():
@@ -153,6 +192,9 @@ def test_answer_audit_includes_source_type_checks():
     assert result["policy"]["lexical_overlap_secondary_only"] is True
     assert result["policy"]["multi_source_fact_union"] is True
     assert result["policy"]["benign_interpretation_requires_explicit_support"] is True
+    assert result["policy"]["citations_removed_before_network_fact_extraction"] is True
+    assert result["policy"]["packet_count_facts_verified"] is True
+    assert result["policy"]["flow_evidence_associations_verified"] is True
     assert result["unsupported_claim_count"] == 1
     assert result["source_type_entailment"]
 
