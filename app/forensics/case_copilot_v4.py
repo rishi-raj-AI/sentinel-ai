@@ -76,7 +76,6 @@ class CaseCopilot(TransportCaseCopilot):
 
                 answer = normalized_model_answer
                 if not self._citations_are_grounded(answer, sources):
-                    # Never repair an answer that already invented Sentinel IDs.
                     if initial_diagnostics.get("unknown_source_ids"):
                         raise RuntimeError(
                             "Model answer referenced unknown Sentinel source IDs: "
@@ -130,6 +129,11 @@ class CaseCopilot(TransportCaseCopilot):
 def install_base_patch() -> None:
     import app.web.dashboard as dashboard
     dashboard.CaseCopilot = CaseCopilot
+    try:
+        import app.forensics.autonomous_investigation as autonomous
+        autonomous.CaseCopilot = CaseCopilot
+    except Exception:
+        pass
 
 
 __all__ = ["CaseCopilot", "CopilotSource", "ModelProvider", "install_base_patch"]
