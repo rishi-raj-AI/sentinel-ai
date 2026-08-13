@@ -17,6 +17,7 @@ from app.forensics.case_copilot_v6 import install_base_patch
 install_base_patch()
 
 from app.cyberbrain.routes import install_x_routes
+from app.cyberbrain.routes_x456 import install_x456_routes
 from app.enterprise.api import install_enterprise_routes
 from app.soc.api import install_soc_routes
 from app.web.autonomous import install_autonomous_routes
@@ -73,7 +74,9 @@ def create_dashboard_app(cases_root: str = "cases", sigma_rules: str = "rules/si
     install_autonomous_routes(app, cases_root=cases_root, sigma_rules=sigma_rules)
     install_enterprise_routes(app, cases_root=cases_root)
     install_soc_routes(app, cases_root=cases_root, sigma_rules=sigma_rules)
-    install_x_routes(app, data_root=os.getenv("SENTINEL_DATA_ROOT", "data"))
+    data_root = os.getenv("SENTINEL_DATA_ROOT", "data")
+    install_x_routes(app, data_root=data_root)
+    install_x456_routes(app, data_root=data_root)
 
     max_request_bytes = int(os.getenv("SENTINEL_MAX_REQUEST_BYTES", str(2 * 1024 * 1024)))
     case_root_path = Path(cases_root)
