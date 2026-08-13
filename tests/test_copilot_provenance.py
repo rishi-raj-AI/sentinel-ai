@@ -80,3 +80,48 @@ def test_provenance_repair_records_metadata_basis():
         "canonical": "EVIDENCE:E0004",
         "basis": "retrieved_evidence_filename_metadata",
     }]
+
+
+class _Provider:
+    configured = True
+    model = "test-model"
+    configured_model = "test-model"
+    persisted_model = "test-model"
+    transport = "test"
+    active_endpoint = "test://local"
+    resolved_model = None
+
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, system_prompt: str, user_prompt: str) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            return "The test artifact warrants review without citations."
+        return (
+            "The YARA test artifact should be reviewed "
+            "[YARA:E0004:Sentinel_Test_Artifact] using "
+            "[EVIDENCE:E0004_yara-test-artifact.txt]."
+        )
+
+
+class _Copilot(CaseCopilot):
+    def retrieve(self, question: str, *, limit: int = 12):
+        return _sources()[:limit]
+
+
+def test_full_repair_path_enters_model_mode_and_audits_provenance(tmp_path):
+    provider = _Provider()
+    result = _Copilot(tmp_path, provider=provider).answer("Assess the YARA match")
+    assert provider.calls == 2
+    assert result["mode"] == "model"
+    assert result["provider_error"] is None
+    assert result["citation_repair_attempted"] is True
+    assert "[EVIDENCE:E0004]" in result["answer"]
+    assert result["provenance_repair_count"] == 1
+    assert result["provenance_repairs_repair_pass"][0]["basis"] == "retrieved_evidence_filename_metadata"
+    assert result["grounding_policy"] == {
+        "unknown_source_ids_rejected": True,
+        "metadata_bound_aliases_only": True,
+        "provenance_repairs_audited": True,
+    }
