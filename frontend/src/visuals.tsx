@@ -1,5 +1,7 @@
 import { BrainCircuit, Cpu, Globe2, Orbit, Radar } from 'lucide-react'
 
+type AgentRow = [string, string, number, string]
+
 export function ReactorXL({ online = true }: { online?: boolean }) {
   return <div className={`reactor-xl ${online ? 'online' : 'offline'}`}>
     <div className="rx halo"/><div className="rx ring-a"/><div className="rx ring-b"/><div className="rx ring-c"/>
@@ -8,12 +10,18 @@ export function ReactorXL({ online = true }: { online?: boolean }) {
   </div>
 }
 
-export function AgentWall({ rows }: { rows: Array<[string,string,number,string]> }) {
-  return <div className="agent-wall">{rows.map(([name,task,pct,tone]) => <div className="agent-tile" key={name}>
-    <div className={`agent-led ${tone}`}/><div className="agent-icon"><Cpu size={15}/></div>
-    <div className="agent-info"><strong>{name}</strong><span>{task}</span><div className="agent-meter"><i style={{width:`${pct}%`}}/></div></div>
-    <div className="agent-pct">{pct}<small>%</small></div>
-  </div>)}</div>
+export function AgentWall({ rows }: { rows: AgentRow[] | Array<(string | number)[]> }) {
+  return <div className="agent-wall">{rows.map((row) => {
+    const name = String(row[0] ?? 'AGENT')
+    const task = String(row[1] ?? 'Ready')
+    const pct = Number(row[2] ?? 0)
+    const tone = String(row[3] ?? 'cyan')
+    return <div className="agent-tile" key={name}>
+      <div className={`agent-led ${tone}`}/><div className="agent-icon"><Cpu size={15}/></div>
+      <div className="agent-info"><strong>{name}</strong><span>{task}</span><div className="agent-meter"><i style={{width:`${pct}%`}}/></div></div>
+      <div className="agent-pct">{pct}<small>%</small></div>
+    </div>
+  })}</div>
 }
 
 export function GlobeField({ primary = 4, secondary = 12 }: { primary?: number; secondary?: number }) {
